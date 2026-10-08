@@ -1,24 +1,19 @@
-# Demo screenshots / 演示截图
+# Screenshots / 实机界面截图
 
-The project should show real, sanitized product screenshots, not generated UI
-presented as real functionality.
+README 展示的七张 WebP 均来自项目真实侧栏界面，由项目作者提供。不是概念图、重绘 UI 或伪造的功能演示。
 
-Capture from a **clean browser profile with fabricated prompts and players**.
-Before committing each image, check tabs, account avatars, addresses, names,
-conversation IDs, local paths and metadata.
+| 文件 | 展示内容 |
+| --- | --- |
+| `AI对话.webp` | 多 AI 对话与统一提问 |
+| `AI 圆桌.webp` | AI 轮流讨论 |
+| `专家团.webp` | 专家模式协作对话 |
+| `AI 狼人杀.webp` | AI 狼人杀公开游戏视角 |
+| `专家团设置.webp` | 专家角色设置面板 |
+| `会话历史.webp` | 会话管理面板 |
+| `设置.webp` | 模型和扩展设置 |
 
-Suggested files for the GitHub landing page:
+截图已检查尺寸、文件格式、帧数和 EXIF 元数据：七张均为单帧 WebP、无 EXIF。其内展示的提示词和公开聊天仅用于介绍扩展外观，不构成相关 AI 平台对本项目的背书。
 
-1. `overview.png`: the five mode tabs and navigation.
-2. `ai-chat.png`: parallel answers from 2–3 demo providers.
-3. `roundtable.png`: sequential relay with visible turn order.
-4. `experts.png`: different expert presets discussing one topic.
-5. `werewolf.png`: only public/game-safe state, with no hidden roles.
-6. `history.png`: session history and Markdown export.
+新增截图请使用演示账号和虚构数据。发布前检查像素内容是否包含真实账号标识、对话 ID、Cookie、Token、私人对话或游戏隐藏身份。原文件应在获授权时再加入公开仓库。
 
-Capture Fog Council only from a sanitized demo session; do not expose hidden
-AI roles, private clues, sealed votes before reveal or account information. Never show reasoning,
-secret night actions, real usernames, cookies, or individual AI account IDs.
-
-Add the verified images under `docs/screenshots/`, then embed only existing
-paths in the README. A screenshot that leaks an account is not marketing.
+没有提供 AI 迷雾议会的独立截图；README 中关于第五模式的文字仅描述公开 v0.2.0 的实现，不使用其他游戏的截图冒充。
