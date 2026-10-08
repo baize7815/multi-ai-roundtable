@@ -56,7 +56,7 @@ export function createReplyForeground(isManaged: (tabId: number) => Promise<bool
   async function syncNow(state: PersistedState, preferredTabId?: number): Promise<void> {
     const privateTabs = new Set([
       ...state.werewolfGames.flatMap((game) => Object.values(game.bindings).map((binding) => binding.tabId)),
-      ...state.fogCouncilGames.flatMap((game) => Object.values(game.bindings).map((binding) => binding.tabId))
+      ...state.clocktowerGames.flatMap((game) => Object.values(game.bindings).map((binding) => binding.tabId))
     ]);
     const targets = new Map<number, Target[]>();
     if (state.settings.replyAcceleration !== false) {

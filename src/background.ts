@@ -7,8 +7,8 @@ import { createReplyForeground } from './background/reply-foreground';
 import { createPrivateGameTab, forgetPrivateGameTab, isPrivateGameTab, preparePrivateGamePage, releaseInactivePrivateGamePages } from './background/private-game-pages';
 import { createWerewolfEngine } from './background/werewolf-engine';
 import type { WerewolfGameSession, WerewolfPendingTurn } from './game/werewolf/types';
-import { createFogCouncilEngine } from './background/fog-council-engine';
-import type { FogCouncilGameSession, FogCouncilPendingTurn } from './game/fog-council/session';
+import { createClocktowerEngine } from './background/clocktower-engine';
+import type { ClocktowerGameSession, ClocktowerPendingTurn } from './game/clocktower/types';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
 
@@ -55,11 +55,11 @@ function gamePendingByOperation(game: WerewolfGameSession, operationId: string):
   return gamePendingTurns(game).find((item) => item.operationId === operationId);
 }
 
-function fogCouncilPendingTurns(game: FogCouncilGameSession): FogCouncilPendingTurn[] {
+function clocktowerPendingTurns(game: ClocktowerGameSession): ClocktowerPendingTurn[] {
   return game.pendingTurn ? [game.pendingTurn] : [];
 }
 
-function fogCouncilPendingByOperation(game: FogCouncilGameSession, operationId: string): FogCouncilPendingTurn | undefined {
+function clocktowerPendingByOperation(game: ClocktowerGameSession, operationId: string): ClocktowerPendingTurn | undefined {
   return game.pendingTurn?.operationId === operationId ? game.pendingTurn : undefined;
 }
 
@@ -72,8 +72,8 @@ function queuePageFramePump(tabId: number, action: 'start' | 'stop'): Promise<vo
       const enabled = state.settings.replyAcceleration !== false || provider === 'doubao' || provider === 'minimax' || await isGameBoundTab(tabId);
       const conversationNeeds = enabled && state.conversations.some((session) => Object.values(session.pendingOperations ?? {}).some((operation) => (operation.provider === provider && operation.phase === 'preparing') || session.bindings[operation.provider]?.tabId === tabId));
       const gameNeeds = enabled && state.werewolfGames.some((game) => gamePendingTurns(game).some((operation) => (operation.provider === provider && operation.phase === 'preparing') || game.bindings[operation.playerId]?.tabId === tabId));
-      const fogCouncilNeeds = enabled && state.fogCouncilGames.some((game) => fogCouncilPendingTurns(game).some((operation) => (operation.provider === provider && operation.phase === 'preparing') || game.bindings[operation.playerId]?.tabId === tabId));
-      if (conversationNeeds || gameNeeds || fogCouncilNeeds) return;
+      const clocktowerNeeds = enabled && state.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((operation) => (operation.provider === provider && operation.phase === 'preparing') || game.bindings[operation.playerId]?.tabId === tabId));
+      if (conversationNeeds || gameNeeds || clocktowerNeeds) return;
       framePumpTabs.delete(tabId);
     }
     await updatePageFramePump(tabId, action);
@@ -236,7 +236,7 @@ async function isManagedTab(tabId: number, provider?: ProviderId): Promise<boole
   // Upgrade game bindings from the old session-only registry without opening
   // a duplicate conversation. Require the persisted URL and old placement.
   const state = await loadState();
-  const binding = [...state.werewolfGames, ...state.fogCouncilGames]
+  const binding = [...state.werewolfGames, ...state.clocktowerGames]
     .flatMap((game) => Object.values(game.bindings))
     .find((item) => item.tabId === tabId && (!provider || item.provider === provider));
   if (!binding?.conversationUrl) return false;
@@ -252,7 +252,7 @@ async function isManagedTab(tabId: number, provider?: ProviderId): Promise<boole
 async function isGameBoundTab(tabId: number): Promise<boolean> {
   if (await isPrivateGameTab(tabId)) return true;
   const state = await loadState();
-  return [...state.werewolfGames, ...state.fogCouncilGames].some((game) => Object.values(game.bindings).some((binding) => binding.tabId === tabId));
+  return [...state.werewolfGames, ...state.clocktowerGames].some((game) => Object.values(game.bindings).some((binding) => binding.tabId === tabId));
 }
 
 async function managedGroups(): Promise<ManagedGroups> {
@@ -482,8 +482,8 @@ async function wakeOperation(operationId: string, requestedTabId?: number, onRea
     const operation = session?.pendingOperations?.[operationId];
     const game = state.werewolfGames.find((item) => Boolean(gamePendingByOperation(item, operationId)));
     const gameOperation = game ? gamePendingByOperation(game, operationId) : undefined;
-    const clockGame = state.fogCouncilGames.find((item) => Boolean(fogCouncilPendingByOperation(item, operationId)));
-    const clockOperation = clockGame ? fogCouncilPendingByOperation(clockGame, operationId) : undefined;
+    const clockGame = state.clocktowerGames.find((item) => Boolean(clocktowerPendingByOperation(item, operationId)));
+    const clockOperation = clockGame ? clocktowerPendingByOperation(clockGame, operationId) : undefined;
     const provider = operation?.provider ?? gameOperation?.provider ?? clockOperation?.provider;
     const tabId = operation
       ? session?.bindings[operation.provider]?.tabId
@@ -541,7 +541,7 @@ async function syncProviderWatchdogNow(): Promise<void> {
     const boundTabs = new Set([
       ...state.conversations.flatMap((session) => Object.values(session.pendingOperations ?? {}).map((operation) => session.bindings[operation.provider]?.tabId)),
       ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => game.bindings[operation.playerId]?.tabId)),
-      ...state.fogCouncilGames.flatMap((game) => fogCouncilPendingTurns(game).map((operation) => game.bindings[operation.playerId]?.tabId))
+      ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => game.bindings[operation.playerId]?.tabId))
     ]);
     await Promise.allSettled([...boundTabs].filter((id): id is number => typeof id === 'number').map(async (tabId) =>
       chrome.tabs.sendMessage(tabId, { type: 'PROVIDER_CONFIG', replyAcceleration: replyAccelerationEnabled,
@@ -552,22 +552,22 @@ async function syncProviderWatchdogNow(): Promise<void> {
   const activeGameTabs = new Set([
     ...state.werewolfGames.flatMap((game) => gamePendingTurns(game)
       .map((operation) => game.bindings[operation.playerId]?.tabId)),
-    ...state.fogCouncilGames.flatMap((game) => fogCouncilPendingTurns(game)
+    ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game)
       .map((operation) => game.bindings[operation.playerId]?.tabId))
   ].filter((tabId): tabId is number => typeof tabId === 'number'));
   await releaseInactivePrivateGamePages(activeGameTabs);
   for (const [tabId, provider] of framePumpTabs) {
     const conversationNeeded = state.conversations.some((session) => Object.values(session.pendingOperations ?? {}).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || session.bindings[provider]?.tabId === tabId)));
     const gameNeeded = state.werewolfGames.some((game) => gamePendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
-    const fogCouncilNeeded = state.fogCouncilGames.some((game) => fogCouncilPendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
-    const needed = (replyAccelerationEnabled || provider === 'doubao' || provider === 'minimax' || await isGameBoundTab(tabId)) && (conversationNeeded || gameNeeded || fogCouncilNeeded);
+    const clocktowerNeeded = state.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
+    const needed = (replyAccelerationEnabled || provider === 'doubao' || provider === 'minimax' || await isGameBoundTab(tabId)) && (conversationNeeded || gameNeeded || clocktowerNeeded);
     if (!needed) {
       await queuePageFramePump(tabId, 'stop').catch(() => undefined);
     }
   }
   const hasConversationWork = state.conversations.some((session) => Object.keys(session.pendingOperations ?? {}).length || session.execution?.status === 'running');
   const hasGameWork = state.werewolfGames.some((game) => gamePendingTurns(game).length > 0 || game.status === 'running')
-    || state.fogCouncilGames.some((game) => fogCouncilPendingTurns(game).length > 0 || game.status === 'running');
+    || state.clocktowerGames.some((game) => clocktowerPendingTurns(game).length > 0 || game.status === 'running');
   const hasWork = hasConversationWork || hasGameWork;
   const needsFrameTimer = (hasConversationWork && replyAccelerationEnabled) || hasGameWork;
   if (needsFrameTimer && replyAccelerationTimer === undefined) {
@@ -597,7 +597,7 @@ async function checkPendingProviders(): Promise<void> {
     // Idle cursors can be resumed after a worker interruption; a live
     // preparing send is never redispatched by a periodic check.
     await werewolfEngine.recover(false);
-    await fogCouncilEngine.recover(false);
+    await clocktowerEngine.recover(false);
     const state = await loadState();
     for (const session of state.conversations) {
       for (const operation of Object.values(session.pendingOperations ?? {})) {
@@ -649,13 +649,13 @@ async function checkPendingProviders(): Promise<void> {
         }
       }
     }
-    for (const game of state.fogCouncilGames) {
-      for (const operation of fogCouncilPendingTurns(game)) {
+    for (const game of state.clocktowerGames) {
+      for (const operation of clocktowerPendingTurns(game)) {
         const tabId = game.bindings[operation.playerId]?.tabId;
         if (!tabId) continue;
         try {
           if (!await isManagedTab(tabId, operation.provider)) {
-            await fogCouncilEngine.handleProviderEvent({ type: 'PROVIDER_ERROR', provider: operation.provider, operationId: operation.operationId, error: '游戏网页绑定失效，已暂停本局，避免操作无关网页或重复发送。' });
+            await clocktowerEngine.handleProviderEvent({ type: 'PROVIDER_ERROR', provider: operation.provider, operationId: operation.operationId, error: '游戏网页绑定失效，已暂停本局，避免操作无关网页或重复发送。' });
             continue;
           }
           await preparePrivateGamePage(tabId, operation.provider);
@@ -667,7 +667,7 @@ async function checkPendingProviders(): Promise<void> {
           if (response.resumed) lastProviderActivity.set(operation.operationId, Date.now());
         } catch {
           if (operation.phase === 'preparing') {
-            await fogCouncilEngine.handleProviderEvent({
+            await clocktowerEngine.handleProviderEvent({
               type: 'PROVIDER_ERROR',
               provider: operation.provider,
               operationId: operation.operationId,
@@ -679,7 +679,7 @@ async function checkPendingProviders(): Promise<void> {
         }
         const lastActivity = lastProviderActivity.get(operation.operationId) ?? operation.startedAt;
         if (Date.now() - lastActivity >= 3 * 60 * 1000) {
-          await fogCouncilEngine.handleProviderEvent({
+          await clocktowerEngine.handleProviderEvent({
             type: 'PROVIDER_ERROR',
             provider: operation.provider,
             operationId: operation.operationId,
@@ -820,7 +820,7 @@ const werewolfEngine = createWerewolfEngine({
   cancel: cancelProvider
 });
 
-const fogCouncilEngine = createFogCouncilEngine({
+const clocktowerEngine = createClocktowerEngine({
   createFreshConversation: (provider, preferredTabId) => createFreshConversation(provider, preferredTabId, false),
   send: (provider, operationId, payload, tabId, conversationUrl) => sendProviderOperation(
     provider,
@@ -828,7 +828,7 @@ const fogCouncilEngine = createFogCouncilEngine({
     payload,
     tabId,
     conversationUrl,
-    async (actualTabId, actualUrl) => { await fogCouncilEngine.attachBinding(operationId, provider, actualTabId, actualUrl); },
+    async (actualTabId, actualUrl) => { await clocktowerEngine.attachBinding(operationId, provider, actualTabId, actualUrl); },
     false
   ),
   cancel: cancelProvider,
@@ -836,7 +836,7 @@ const fogCouncilEngine = createFogCouncilEngine({
 });
 
 async function routeProviderEvent(event: ProviderEvent): Promise<void> {
-  const handled = await werewolfEngine.handleProviderEvent(event) || await fogCouncilEngine.handleProviderEvent(event);
+  const handled = await werewolfEngine.handleProviderEvent(event) || await clocktowerEngine.handleProviderEvent(event);
   if (!handled) await orchestrator.handleProviderEvent(event);
 }
 
@@ -852,7 +852,7 @@ async function replayPendingTerminalEvents(state?: PersistedState): Promise<void
     ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => ({
       operationId: operation.operationId, provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId
     }))),
-    ...state.fogCouncilGames.flatMap((game) => fogCouncilPendingTurns(game).map((operation) => ({
+    ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => ({
       operationId: operation.operationId, provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId
     })))
   ];
@@ -880,7 +880,7 @@ async function acceleratePendingReplies(): Promise<void> {
     // the worker without checking, resuming or submitting an AI operation.
     const privateTargets = [
       ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId }))),
-      ...state.fogCouncilGames.flatMap((game) => fogCouncilPendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId })))
+      ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId })))
     ];
     await Promise.allSettled(privateTargets.map(async ({ tabId, provider }) => {
       if (!tabId || !await isManagedTab(tabId, provider)) return;
@@ -948,8 +948,8 @@ async function resumePendingOperationsForTab(tabId: number): Promise<void> {
       }
     }
   }
-  for (const game of state.fogCouncilGames) {
-    for (const operation of fogCouncilPendingTurns(game)) {
+  for (const game of state.clocktowerGames) {
+    for (const operation of clocktowerPendingTurns(game)) {
       if (game.bindings[operation.playerId]?.tabId !== tabId) continue;
       if (sendingOperations.has(operation.operationId)) continue;
       try {
@@ -959,7 +959,7 @@ async function resumePendingOperationsForTab(tabId: number): Promise<void> {
           operationId: operation.operationId
         }, 15000);
       } catch {
-        // The watchdog will retry without re-submitting a FogCouncil prompt.
+        // The watchdog will retry without re-submitting a Clocktower prompt.
       }
     }
   }
@@ -998,7 +998,7 @@ void (async () => {
   await replayPendingTerminalEvents();
   await orchestrator.recover();
   await werewolfEngine.recover();
-  await fogCouncilEngine.recover();
+  await clocktowerEngine.recover();
   await recoverQueuedCommands();
   await syncProviderWatchdog();
   await checkPendingProviders();
@@ -1034,8 +1034,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const state = await loadState();
         const conversationNeeded = state.conversations.some((session) => Object.values(session.pendingOperations ?? {}).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || session.bindings[provider]?.tabId === tabId)));
         const gameNeeded = state.werewolfGames.some((game) => gamePendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
-        const fogCouncilNeeded = state.fogCouncilGames.some((game) => fogCouncilPendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
-        const needed = conversationNeeded || gameNeeded || fogCouncilNeeded;
+        const clocktowerNeeded = state.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
+        const needed = conversationNeeded || gameNeeded || clocktowerNeeded;
         if (needed || await isPrivateGameTab(tabId, provider)) await startPageFramePump(tabId, provider);
         return { success: true };
       }
@@ -1052,8 +1052,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const game = state.werewolfGames.find((item) => Boolean(gamePendingByOperation(item, operationId)));
         const gameOperation = game ? gamePendingByOperation(game, operationId) : undefined;
         const gameMatches = Boolean(gameOperation && game?.bindings[gameOperation.playerId]?.tabId === sender.tab?.id);
-        const clockGame = state.fogCouncilGames.find((item) => Boolean(fogCouncilPendingByOperation(item, operationId)));
-        const clockOperation = clockGame ? fogCouncilPendingByOperation(clockGame, operationId) : undefined;
+        const clockGame = state.clocktowerGames.find((item) => Boolean(clocktowerPendingByOperation(item, operationId)));
+        const clockOperation = clockGame ? clocktowerPendingByOperation(clockGame, operationId) : undefined;
         const clockMatches = Boolean(clockOperation && clockGame?.bindings[clockOperation.playerId]?.tabId === sender.tab?.id);
         if ((operation && owner?.bindings[operation.provider]?.tabId === sender.tab?.id) || gameMatches || clockMatches) wakeReleases.get(operationId)?.();
         return { success: true };
@@ -1164,36 +1164,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await werewolfEngine.deleteGame(String(message.gameId));
         return { success: true };
       }
-      case 'CREATE_FOG_COUNCIL_GAME': {
-        const game = await fogCouncilEngine.createGame(message.setup);
+      case 'CREATE_CLOCKTOWER_GAME': {
+        const game = await clocktowerEngine.createGame(message.setup);
         return { success: true, gameId: game.id };
       }
-      case 'UPDATE_FOG_COUNCIL_SETUP': {
-        await fogCouncilEngine.updateSetup(message.setup);
+      case 'UPDATE_CLOCKTOWER_SETUP': {
+        await clocktowerEngine.updateSetup(message.setup);
         return { success: true };
       }
-      case 'SET_ACTIVE_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.setActiveGame(message.gameId ? String(message.gameId) : undefined);
+      case 'SET_ACTIVE_CLOCKTOWER_GAME': {
+        await clocktowerEngine.setActiveGame(message.gameId ? String(message.gameId) : undefined);
         return { success: true };
       }
-      case 'START_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.startGame(String(message.gameId));
+      case 'START_CLOCKTOWER_GAME': {
+        await clocktowerEngine.startGame(String(message.gameId));
         return { success: true };
       }
-      case 'INTERRUPT_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.interruptGame(String(message.gameId));
+      case 'INTERRUPT_CLOCKTOWER_GAME': {
+        await clocktowerEngine.interruptGame(String(message.gameId));
         return { success: true };
       }
-      case 'RESUME_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.resumeGame(String(message.gameId));
+      case 'RESUME_CLOCKTOWER_GAME': {
+        await clocktowerEngine.resumeGame(String(message.gameId));
         return { success: true };
       }
-      case 'SUBMIT_FOG_COUNCIL_HUMAN_ACTION': {
-        await fogCouncilEngine.submitHumanAction(String(message.gameId), message.submission ?? {});
+      case 'SUBMIT_CLOCKTOWER_HUMAN_ACTION': {
+        await clocktowerEngine.submitHumanAction(String(message.gameId), message.submission ?? {});
         return { success: true };
       }
-      case 'DELETE_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.deleteGame(String(message.gameId));
+      case 'DELETE_CLOCKTOWER_GAME': {
+        await clocktowerEngine.deleteGame(String(message.gameId));
         return { success: true };
       }
       case 'SEND_TO_PROVIDER': {

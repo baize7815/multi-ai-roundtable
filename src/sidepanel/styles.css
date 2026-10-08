@@ -270,8 +270,8 @@ button:disabled { cursor: default; }
 .roundtable-status { justify-self: end; min-width: 52px; text-align: right; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .werewolf-controls { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px; padding: 7px 3px 0; }
 .werewolf-controls .roundtable-status { align-self: center; }
-.fog-council-controls { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 7px; padding: 7px 3px 0; }
-.fog-council-controls .roundtable-status { align-self: center; }
+.clocktower-controls { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 7px; padding: 7px 3px 0; }
+.clocktower-controls .roundtable-status { align-self: center; }
 .secondary-button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: #51586a; font-size: 12px; }
 .secondary-button:hover { background: rgba(30,35,50,.04); }
 
@@ -279,10 +279,10 @@ button:disabled { cursor: default; }
 .werewolf-setup-fields label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; }
 .werewolf-setup-fields select { min-width: 0; height: 30px; padding: 0 7px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); }
 .werewolf-human-toggle { display: flex !important; align-items: center; gap: 6px !important; padding-top: 17px; color: var(--text) !important; }
-.fog-council-setup-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 0 0 9px; }
-.fog-council-setup-fields label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; }
-.fog-council-setup-fields select { min-width: 0; height: 30px; padding: 0 7px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); }
-.fog-council-human-toggle { display: flex !important; align-items: center; gap: 6px !important; padding-top: 17px; color: var(--text) !important; }
+.clocktower-setup-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 0 0 9px; }
+.clocktower-setup-fields label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; }
+.clocktower-setup-fields select { min-width: 0; height: 30px; padding: 0 7px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); }
+.clocktower-human-toggle { display: flex !important; align-items: center; gap: 6px !important; padding-top: 17px; color: var(--text) !important; }
 
 .werewolf-dashboard { display: grid; gap: 12px; width: 100%; min-width: 0; }
 .werewolf-hero { padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.74); }
@@ -326,24 +326,26 @@ button:disabled { cursor: default; }
 .werewolf-setup-card h3 { margin: 0 0 6px; font-size: 15px; }
 .werewolf-setup-card p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
 
-.fog-council-private-card { padding: 10px 11px; border: 1px solid rgba(130,91,170,.13); border-radius: 11px; background: rgba(130,91,170,.06); color: #55566f; font-size: 11px; line-height: 1.55; }
-.fog-council-dead-vote { display: inline-flex; align-items: center; gap: 3px; padding: 1px 5px; border-radius: 999px; background: rgba(72,80,105,.07); color: var(--muted); font-size: 9px; }
-.fog-council-nomination { padding: 8px 10px; border: 1px solid rgba(85,105,160,.11); border-radius: 10px; background: rgba(85,105,160,.045); font-size: 10px; color: #62697a; }
-.fog-council-script-body { display: grid; gap: 18px; }
-.fog-council-script-group h3 { margin: 0 0 8px; font-size: 13px; }
-.fog-council-script-grid { display: grid; gap: 7px; }
-.fog-council-role-row { display: grid; grid-template-columns: 6px minmax(0, 1fr); gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
-.fog-council-role-bar { border-radius: 999px; background: #7b87a3; }
-.fog-council-role-row.outsider .fog-council-role-bar { background: #5b83d6; }
-.fog-council-role-row.minion .fog-council-role-bar { background: #b45e75; }
-.fog-council-role-row.demon .fog-council-role-bar { background: #d24d4d; }
-.fog-council-role-name { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 650; }
-.fog-council-role-timing { color: var(--muted); font-size: 9px; font-weight: 400; }
-.fog-council-role-description { margin-top: 4px; color: #686e7e; font-size: 10px; line-height: 1.55; }
-.fog-council-human-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
-.fog-council-target-button { min-width: 54px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--text); }
-.fog-council-target-button.active { border-color: rgba(87,110,178,.38); background: rgba(87,110,178,.08); }
-.fog-council-target-button:hover { background: rgba(30,35,50,.045); }
+.clocktower-private-card { padding: 10px 11px; border: 1px solid rgba(130,91,170,.13); border-radius: 11px; background: rgba(130,91,170,.06); color: #55566f; font-size: 11px; line-height: 1.55; }
+.clocktower-dead-vote { display: inline-flex; align-items: center; gap: 3px; padding: 1px 5px; border-radius: 999px; background: rgba(72,80,105,.07); color: var(--muted); font-size: 9px; }
+.clocktower-nomination { padding: 8px 10px; border: 1px solid rgba(85,105,160,.11); border-radius: 10px; background: rgba(85,105,160,.045); font-size: 10px; color: #62697a; }
+.clocktower-script-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; width: 100%; min-width: 0; }
+.clocktower-script-group { min-width: 0; width: 100%; }
+.clocktower-script-group h3 { margin: 0 0 8px; font-size: 13px; }
+.clocktower-script-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; width: 100%; min-width: 0; }
+.clocktower-role-row { display: grid; grid-template-columns: 6px minmax(0, 1fr); gap: 8px; width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
+.clocktower-role-row > div:last-child { min-width: 0; }
+.clocktower-role-bar { border-radius: 999px; background: #7b87a3; }
+.clocktower-role-row.outsider .clocktower-role-bar { background: #5b83d6; }
+.clocktower-role-row.minion .clocktower-role-bar { background: #b45e75; }
+.clocktower-role-row.demon .clocktower-role-bar { background: #d24d4d; }
+.clocktower-role-name { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 650; }
+.clocktower-role-timing { color: var(--muted); font-size: 9px; font-weight: 400; }
+.clocktower-role-description { margin-top: 4px; color: #686e7e; font-size: 10px; line-height: 1.55; white-space: normal; overflow-wrap: break-word; word-break: normal; }
+.clocktower-human-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.clocktower-target-button { min-width: 54px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--text); }
+.clocktower-target-button.active { border-color: rgba(87,110,178,.38); background: rgba(87,110,178,.08); }
+.clocktower-target-button:hover { background: rgba(30,35,50,.045); }
 
 .primary-button, .text-button, .wide-create-button {
   border: 0;
@@ -455,8 +457,8 @@ button:disabled { cursor: default; }
   .expert-select { min-width: 74px; max-width: 92px; }
   .werewolf-seat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .werewolf-setup-fields { grid-template-columns: 1fr 1fr; }
-  .fog-council-setup-fields { grid-template-columns: 1fr 1fr; }
-  .fog-council-controls { grid-template-columns: auto auto minmax(0, 1fr); }
+  .clocktower-setup-fields { grid-template-columns: 1fr 1fr; }
+  .clocktower-controls { grid-template-columns: auto auto minmax(0, 1fr); }
 }
 
 @media (max-width: 340px) {

@@ -1,6 +1,6 @@
 {
   "name": "multi-ai-roundtable",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,7 @@
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test:werewolf": "node scripts/test-werewolf.mjs",
-    "test:fog-council": "node scripts/test-fog-council.mjs"
+    "test:clocktower": "node scripts/test-clocktower.mjs"
   },
   "dependencies": {
     "dompurify": "^3.2.6",

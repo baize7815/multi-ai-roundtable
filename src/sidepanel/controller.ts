@@ -6,9 +6,15 @@ import { buildExpertPresetTransferFile, mergeExpertPresets, parseExpertPresetTra
 import { humanVisibleEvents } from '../game/werewolf/context';
 import { ROLE_LABELS } from '../game/werewolf/rules';
 import type { WerewolfActionType, WerewolfGameSession, WerewolfPendingHumanAction, WerewolfSetupSettings } from '../game/werewolf/types';
-import { COUNCIL_ROLES, COUNCIL_ROLE_BY_ID } from '../game/fog-council/roles';
-import { visibleCouncilEvents } from '../game/fog-council/core';
-import type { FogCouncilGameSession, FogCouncilPendingHumanAction, FogCouncilSetupSettings } from '../game/fog-council/session';
+import { clocktowerRoleById, TROUBLE_BREWING_ROLES } from '../game/clocktower/scripts';
+import { publiclyAlive } from '../game/clocktower/core';
+import type {
+  ClocktowerActionType,
+  ClocktowerGameSession,
+  ClocktowerPendingHumanAction,
+  ClocktowerRoleId,
+  ClocktowerSetupSettings
+} from '../game/clocktower/types';
 import type {
   AttachmentPayload,
   ChatMessage,
@@ -50,6 +56,7 @@ let currentOperationId: string | null = null;
 let currentProvider: ProviderId | null = null;
 let currentSequentialSessionId: string | null = null;
 let editingExpertId: string | null = null;
+let clocktowerSelectedTargets: number[] = [];
 
 type ProviderAvailabilityState = 'unknown' | 'ready' | 'error';
 interface ProviderAvailability {
@@ -74,7 +81,7 @@ async function saveState(nextState: PersistedState): Promise<void> {
   const baseline = uiBaseline;
   const changed = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
   const settings: Partial<PersistedState['settings']> = {};
-  for (const key of ['replyAcceleration', 'qaProviders', 'roundtableProviders', 'werewolfProviders', 'fogCouncilProviders', 'expertPresetByProvider'] as const) {
+  for (const key of ['replyAcceleration', 'qaProviders', 'roundtableProviders', 'werewolfProviders', 'clocktowerProviders', 'expertPresetByProvider'] as const) {
     if (changed(nextState.settings[key], baseline.settings[key])) Object.assign(settings, { [key]: nextState.settings[key] });
   }
   const sessions = nextState.conversations.flatMap<{ id: string; created?: ConversationSession; addedMessages?: ChatMessage[]; rounds?: number; expertAssignments?: ConversationSession['expertAssignments']; title?: string }>((session) => {
@@ -112,7 +119,7 @@ function isSequentialMode(mode: Mode): mode is SequentialMode {
 }
 
 function isConversationMode(mode: Mode): mode is ConversationMode {
-  return mode !== 'werewolf' && mode !== 'fog_council';
+  return mode !== 'werewolf' && mode !== 'clocktower';
 }
 
 function isActiveConversation(session: ConversationSession): boolean {
@@ -171,8 +178,8 @@ function activeWerewolfGame(): WerewolfGameSession | undefined {
   return state.activeWerewolfGameId ? state.werewolfGames.find((game) => game.id === state.activeWerewolfGameId) : undefined;
 }
 
-function activeFogCouncilGame(): FogCouncilGameSession | undefined {
-  return state.activeFogCouncilGameId ? state.fogCouncilGames.find((game) => game.id === state.activeFogCouncilGameId) : undefined;
+function activeClocktowerGame(): ClocktowerGameSession | undefined {
+  return state.activeClocktowerGameId ? state.clocktowerGames.find((game) => game.id === state.activeClocktowerGameId) : undefined;
 }
 
 function deriveTitle(payload: ComposerPayload): string {
@@ -360,6 +367,18 @@ async function submitWerewolfHumanAction(submission: { text?: string; actionType
   }
 }
 
+async function submitClocktowerHumanAction(submission: { text?: string; actionType?: ClocktowerActionType; targetSeat?: number; targetSeats?: number[] }): Promise<void> {
+  const game = activeClocktowerGame();
+  if (!game?.pendingHumanAction) return;
+  try {
+    await runtimeMessage({ type: 'SUBMIT_CLOCKTOWER_HUMAN_ACTION', gameId: game.id, submission });
+    clocktowerSelectedTargets = [];
+    clearComposer();
+  } catch (error) {
+    showComposerError(error instanceof Error ? error.message : String(error));
+  }
+}
+
 function renderHumanActionPanel(game: WerewolfGameSession, pending: WerewolfPendingHumanAction, dashboard: HTMLElement): void {
   if (humanTextTurn(pending)) return;
   const panel = document.createElement('div');
@@ -525,151 +544,321 @@ function renderWerewolf(): void {
   else renderWerewolfGame(game);
 }
 
-function fogCouncilPhaseLabel(game: FogCouncilGameSession): string {
-  const labels = { setup: '待开始', briefing: '接收线索', debate: '公开辩论', ballot: '密封表决', ended: '游戏结束' } as const;
-  return labels[game.phase];
+function clocktowerPhaseLabel(game: ClocktowerGameSession): string {
+  const labels: Partial<Record<ClocktowerGameSession['phase'], string>> = {
+    setup: '等待开始',
+    first_night: '第一夜',
+    other_night: `第 ${game.day} 夜`,
+    dawn: `第 ${game.day} 天天亮`,
+    day_whispers: '私聊阶段',
+    day_discussion: '公开讨论',
+    nomination: '提名阶段',
+    accusation: '指控',
+    defense: '辩护',
+    vote: '公开投票',
+    execution: '处决结算',
+    day_end: '白天结束',
+    ended: '游戏结束'
+  };
+  return labels[game.phase] ?? game.phase;
 }
 
-function fogCouncilStatusLabel(game: FogCouncilGameSession): string {
-  if (game.status === 'paused') return '已暂停' + (game.errorMessage ? ' · ' + game.errorMessage : '');
-  if (game.status === 'ended') return game.winner === 'clarity' ? '清晰阵营获胜' : '迷雾阵营获胜';
-  return fogCouncilPhaseLabel(game);
+function clocktowerStatusLabel(game: ClocktowerGameSession): string {
+  if (game.status === 'ended') return game.winner ? `${game.winner === 'good' ? '善良' : '邪恶'}胜利` : '已结束';
+  if (game.status === 'paused') return '已中断';
+  if (game.status === 'error') return '异常暂停';
+  if (game.status === 'waiting_human') return '等待你的行动';
+  return clocktowerPhaseLabel(game);
 }
 
-function fogCouncilVisibleEvents(game: FogCouncilGameSession) {
-  return visibleCouncilEvents(game, game.humanSeat);
+function clocktowerHumanPlayer(game: ClocktowerGameSession) {
+  return game.players.find((player) => player.controller === 'human');
 }
 
-function fogCouncilHumanTextTurn(pending?: FogCouncilPendingHumanAction): boolean {
-  return pending?.kind === 'speech';
+function clocktowerVisibleEvents(game: ClocktowerGameSession) {
+  const human = clocktowerHumanPlayer(game);
+  return game.events.filter((event) => {
+    if (event.visibility.type === 'public') return true;
+    if (event.visibility.type === 'post_game') return game.status === 'ended';
+    if (event.visibility.type === 'private') return Boolean(human && event.visibility.seats.includes(human.seat));
+    return false;
+  });
 }
 
-function renderFogCouncilScript(): void {
-  const body = el<HTMLElement>('fogCouncilScriptBody');
+function clocktowerHumanTextTurn(pending?: ClocktowerPendingHumanAction): boolean {
+  if (!pending) return false;
+  return pending.expectedActions.length === 0 || pending.kind === 'whisper';
+}
+
+function renderClocktowerScript(): void {
+  const body = el<HTMLElement>('clocktowerScriptBody');
   body.replaceChildren();
-  for (const role of COUNCIL_ROLES) {
-    const row = document.createElement('div');
-    row.className = 'fog-council-role-row ' + (role.faction === 'clarity' ? 'townsfolk' : 'minion');
-    const content = document.createElement('div');
-    const name = document.createElement('strong');
-    name.textContent = role.name + ' · ' + (role.faction === 'clarity' ? '清晰阵营' : '迷雾阵营');
-    const desc = document.createElement('div');
-    desc.className = 'fog-council-role-description';
-    desc.textContent = role.description;
-    content.append(name, desc);
-    row.append(content);
-    body.append(row);
+  const groups: Array<[string, ClocktowerRoleId[]]> = [
+    ['镇民 · Townsfolk', TROUBLE_BREWING_ROLES.filter((role) => role.type === 'townsfolk').map((role) => role.id)],
+    ['外来者 · Outsiders', TROUBLE_BREWING_ROLES.filter((role) => role.type === 'outsider').map((role) => role.id)],
+    ['爪牙 · Minions', TROUBLE_BREWING_ROLES.filter((role) => role.type === 'minion').map((role) => role.id)],
+    ['恶魔 · Demon', TROUBLE_BREWING_ROLES.filter((role) => role.type === 'demon').map((role) => role.id)]
+  ];
+  for (const [label, ids] of groups) {
+    const section = document.createElement('section');
+    section.className = 'clocktower-script-group';
+    const heading = document.createElement('h3');
+    heading.textContent = label;
+    const grid = document.createElement('div');
+    grid.className = 'clocktower-script-grid';
+    for (const roleId of ids) {
+      const role = clocktowerRoleById[roleId];
+      const row = document.createElement('div');
+      row.className = `clocktower-role-row ${role.type}`;
+      const bar = document.createElement('span');
+      bar.className = 'clocktower-role-bar';
+      const content = document.createElement('div');
+      const name = document.createElement('div');
+      name.className = 'clocktower-role-name';
+      const title = document.createElement('span');
+      title.textContent = role.name;
+      const timing = document.createElement('span');
+      timing.className = 'clocktower-role-timing';
+      timing.textContent = role.timing;
+      name.append(title, timing);
+      const description = document.createElement('div');
+      description.className = 'clocktower-role-description';
+      description.textContent = role.publicDescription;
+      content.append(name, description);
+      row.append(bar, content);
+      grid.append(row);
+    }
+    section.append(heading, grid);
+    body.append(section);
   }
 }
 
-function renderFogCouncilSetup(): void {
+function renderClocktowerSetup(): void {
   messagesEl.replaceChildren();
   const card = document.createElement('section');
   card.className = 'werewolf-setup-card';
-  const image = document.createElement('img');
-  image.src = chrome.runtime.getURL('SVG/迷雾议会.svg');
-  image.alt = '';
-  const heading = document.createElement('h3');
-  heading.textContent = 'AI 迷雾议会';
-  const setup = state.fogCouncilSetup;
-  const aiNeeded = setup.playerCount - (setup.includeHuman ? 1 : 0);
-  const description = document.createElement('p');
-  description.textContent = setup.playerCount + ' 位议员，五轮信号推理。两名迷雾成员隐藏身份，清晰阵营需要通过公开辩论和密封投票修复三个频道。当前需要 ' + aiNeeded + ' 个已登录的 AI 模型，开局为每位 AI 创建独立网页会话。';
-  card.append(image, heading, description);
+  const icon = document.createElement('img');
+  icon.src = chrome.runtime.getURL('SVG/迷雾议会.svg');
+  icon.alt = '';
+  const title = document.createElement('h3');
+  title.textContent = 'AI 迷雾议会';
+  const setup = state.clocktowerSetup;
+  const neededAi = setup.playerCount - (setup.includeHuman ? 1 : 0);
+  const selected = state.settings.clocktowerProviders.filter((provider) => providerById[provider]?.enabled);
+  const body = document.createElement('p');
+  body.textContent = `${setup.playerCount} 人 · 经典身份剧本 · ${setup.setupMode === 'curated' ? '推荐阵容' : '随机合法阵容'} · ${setup.includeHuman ? '你 + ' : ''}${neededAi} 个 AI 玩家。已选择 ${selected.length} 个模型，开始时为每名 AI 创建独立网页会话。`;
+  card.append(icon, title, body);
   messagesEl.append(card);
 }
 
-async function submitFogCouncilHumanAction(submission: { text?: string; channel?: 'A' | 'B' | 'C' }): Promise<void> {
-  const game = activeFogCouncilGame();
-  if (!game?.pendingHumanAction) return;
-  try {
-    await runtimeMessage({ type: 'SUBMIT_FOG_COUNCIL_HUMAN_ACTION', gameId: game.id, submission });
-    clearComposer();
-  } catch (error) {
-    showComposerError(error instanceof Error ? error.message : String(error));
+function renderClocktowerHumanActionPanel(game: ClocktowerGameSession, pending: ClocktowerPendingHumanAction, dashboard: HTMLElement): void {
+  const panel = document.createElement('div');
+  panel.className = 'clocktower-human-actions';
+  const intro = document.createElement('div');
+  intro.style.width = '100%';
+  intro.style.fontSize = '11px';
+  intro.style.color = 'var(--muted)';
+  intro.textContent = pending.prompt.includes('[CURRENT TURN]') ? `轮到你行动 · ${clocktowerPhaseLabel(game)}` : pending.prompt;
+  panel.append(intro);
+
+  const submitDirect = (actionType: ClocktowerActionType, targetSeats?: number[]) => void submitClocktowerHumanAction({ actionType, targetSeats });
+  if (pending.expectedActions.includes('vote_yes')) {
+    const yes = document.createElement('button');
+    yes.type = 'button';
+    yes.className = 'clocktower-target-button';
+    yes.textContent = '投票';
+    yes.addEventListener('click', () => submitDirect('vote_yes'));
+    const no = document.createElement('button');
+    no.type = 'button';
+    no.className = 'clocktower-target-button';
+    no.textContent = '不投';
+    no.addEventListener('click', () => submitDirect('vote_no'));
+    panel.append(yes, no);
   }
+
+  const targetAction = pending.expectedActions.find((action) => ['choose_player', 'choose_players', 'nominate', 'slay'].includes(action));
+  if (targetAction) {
+    if (targetAction === 'choose_players') {
+      for (const target of pending.allowedTargets) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `clocktower-target-button ${clocktowerSelectedTargets.includes(target) ? 'active' : ''}`;
+        button.textContent = `${target}号`;
+        button.addEventListener('click', () => {
+          if (clocktowerSelectedTargets.includes(target)) clocktowerSelectedTargets = clocktowerSelectedTargets.filter((seat) => seat !== target);
+          else if (clocktowerSelectedTargets.length < pending.maxTargets) clocktowerSelectedTargets = [...clocktowerSelectedTargets, target];
+          renderMode();
+        });
+        panel.append(button);
+      }
+      const submit = document.createElement('button');
+      submit.type = 'button';
+      submit.className = 'primary-button';
+      submit.textContent = '确认';
+      submit.disabled = clocktowerSelectedTargets.length < pending.minTargets || clocktowerSelectedTargets.length > pending.maxTargets;
+      submit.addEventListener('click', () => submitDirect('choose_players', [...clocktowerSelectedTargets]));
+      panel.append(submit);
+    } else {
+      for (const target of pending.allowedTargets) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'clocktower-target-button';
+        button.textContent = `${targetAction === 'nominate' ? '提名 ' : targetAction === 'slay' ? '发动技能 ' : '选择 '}${target}号`;
+        button.addEventListener('click', () => submitDirect(targetAction, [target]));
+        panel.append(button);
+      }
+    }
+  }
+  if (pending.expectedActions.includes('pass')) {
+    const pass = document.createElement('button');
+    pass.type = 'button';
+    pass.className = 'clocktower-target-button';
+    pass.textContent = '跳过';
+    pass.addEventListener('click', () => submitDirect('pass'));
+    panel.append(pass);
+  }
+  if (pending.kind === 'whisper' && pending.expectedActions.includes('whisper')) {
+    const hint = document.createElement('div');
+    hint.style.width = '100%';
+    hint.style.fontSize = '10px';
+    hint.style.color = 'var(--muted)';
+    hint.textContent = '先在下方输入私聊内容，再选择目标座位。';
+    panel.append(hint);
+    for (const target of pending.allowedTargets) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `clocktower-target-button ${clocktowerSelectedTargets[0] === target ? 'active' : ''}`;
+      button.textContent = `${target}号`;
+      button.addEventListener('click', () => { clocktowerSelectedTargets = [target]; renderMode(); });
+      panel.append(button);
+    }
+  }
+  dashboard.append(panel);
 }
 
-function renderFogCouncilGame(game: FogCouncilGameSession): void {
+function renderClocktowerGame(game: ClocktowerGameSession): void {
   messagesEl.replaceChildren();
   const dashboard = document.createElement('section');
   dashboard.className = 'werewolf-dashboard';
   const hero = document.createElement('div');
   hero.className = 'werewolf-hero';
-  const title = document.createElement('div');
-  title.className = 'werewolf-hero-title';
-  title.textContent = game.title + ' · ' + fogCouncilStatusLabel(game);
-  const summary = document.createElement('p');
-  summary.className = 'werewolf-hero-sub';
-  summary.textContent = '第 ' + game.round + ' 轮 · ' + fogCouncilPhaseLabel(game) + ' · 清晰 ' + game.clarityScore + ' : ' + game.mistScore + ' 迷雾';
-  hero.append(title, summary);
+  const heroTitle = document.createElement('div');
+  heroTitle.className = 'werewolf-hero-title';
+  const title = document.createElement('span');
+  title.textContent = game.title;
+  const status = document.createElement('span');
+  status.textContent = clocktowerStatusLabel(game);
+  status.style.color = game.status === 'error' || game.status === 'paused' ? 'var(--danger)' : 'var(--muted)';
+  status.style.fontSize = '10px';
+  heroTitle.append(title, status);
+  const sub = document.createElement('div');
+  sub.className = 'werewolf-hero-sub';
+  sub.textContent = `经典身份剧本 · ${game.rulesetSnapshot.playerCount} 人 · 第 ${game.day} 天 · ${clocktowerPhaseLabel(game)} · Final-only`;
+  hero.append(heroTitle, sub);
   dashboard.append(hero);
+
+  const human = clocktowerHumanPlayer(game);
+  if (human) {
+    const card = document.createElement('div');
+    card.className = 'clocktower-private-card';
+    const perceived = clocktowerRoleById[human.perceivedCharacter];
+    let extra = '';
+    if (!game.rulesetSnapshot.teensyvilleEvilInfo && human.alignment === 'evil') {
+      if (human.trueCharacter === 'imp') {
+        const minions = game.players.filter((player) => clocktowerRoleById[player.trueCharacter].type === 'minion').map((player) => `${player.seat}号`).join('、');
+        extra = ` 爪牙：${minions || '无'}；安全伪装：${game.demonBluffs.map((role) => clocktowerRoleById[role].name).join('、')}。`;
+      } else {
+        const demon = game.players.find((player) => player.trueCharacter === 'imp');
+        extra = ` 恶魔：${demon?.seat ?? '?'}号。`;
+      }
+    }
+    card.textContent = `你是 ${human.seat}号 · ${perceived.name} · ${human.alignment === 'good' ? '善良' : '邪恶'}阵营。能力：${perceived.publicDescription}${extra}`;
+    dashboard.append(card);
+  }
 
   const seats = document.createElement('div');
   seats.className = 'werewolf-seat-grid';
-  for (const player of game.players) {
+  for (const player of [...game.players].sort((a, b) => a.seat - b.seat)) {
+    const publicAlive = publiclyAlive(game, player);
     const seat = document.createElement('div');
-    seat.className = 'werewolf-seat ' + (player.seat === game.humanSeat ? 'human' : '');
+    seat.className = `werewolf-seat ${publicAlive ? '' : 'dead'} ${player.controller === 'human' ? 'human' : ''}`;
+    if (player.providerId) {
+      const avatar = document.createElement('img');
+      avatar.src = providerIconUrl(player.providerId);
+      avatar.alt = '';
+      seat.append(avatar);
+    } else {
+      const humanAvatar = document.createElement('div');
+      humanAvatar.textContent = '你';
+      humanAvatar.style.fontWeight = '650';
+      seat.append(humanAvatar);
+    }
     const name = document.createElement('strong');
-    const provider = game.seatProviders[player.seat];
-    name.textContent = player.seat + '号 · ' + (provider ? providerLabel(provider) : '你');
+    name.textContent = `${player.seat}号 · ${player.controller === 'human' ? '你' : providerLabel(player.providerId)}`;
     const role = document.createElement('span');
-    role.textContent = game.status === 'ended' || player.seat === game.humanSeat
-      ? COUNCIL_ROLE_BY_ID[player.role].name : '身份隐藏';
+    role.textContent = game.status === 'ended'
+      ? clocktowerRoleById[player.trueCharacter].name
+      : player.controller === 'human' ? clocktowerRoleById[player.perceivedCharacter].name
+        : publicAlive ? '身份隐藏' : '已死亡';
     seat.append(name, role);
+    if (!publicAlive) {
+      const vote = document.createElement('span');
+      vote.className = 'clocktower-dead-vote';
+      vote.textContent = player.deadVoteAvailable ? '死者票可用' : '死者票已用';
+      seat.append(vote);
+    }
     seats.append(seat);
   }
   dashboard.append(seats);
 
-  if (game.humanSeat && game.current && game.status !== 'ended') {
-    const self = game.players.find(player => player.seat === game.humanSeat)!;
-    const clue = document.createElement('div');
-    clue.className = 'fog-council-private-card';
-    clue.textContent = '你的身份：' + COUNCIL_ROLE_BY_ID[self.role].name + ' · ' + (self.faction === 'clarity' ? '清晰' : '迷雾') + '阵营。本轮信号：' + game.current.clues[self.seat].text;
-    dashboard.append(clue);
+  if (game.nominations.length) {
+    const latest = game.nominations.filter((item) => item.day === game.day).at(-1);
+    if (latest) {
+      const nomination = document.createElement('div');
+      nomination.className = 'clocktower-nomination';
+      nomination.textContent = `今日最近提名：${latest.nominatorSeat}号 → ${latest.nomineeSeat}号 · ${latest.resolved ? `${latest.voteCount}票 / 门槛${latest.threshold}` : '进行中'}${game.aboutToDieSeat ? ` · 当前待处决：${game.aboutToDieSeat}号` : ''}`;
+      dashboard.append(nomination);
+    }
   }
+
   const events = document.createElement('div');
   events.className = 'werewolf-events';
-  for (const item of fogCouncilVisibleEvents(game)) {
+  for (const event of clocktowerVisibleEvents(game)) {
+    if (!event.content || event.type === 'phase') continue;
     const row = document.createElement('article');
-    row.className = 'werewolf-event';
+    const author = event.authorSeat ? game.players.find((player) => player.seat === event.authorSeat) : undefined;
+    row.className = `werewolf-event ${event.visibility.type === 'private' ? 'private' : ''} ${author?.providerId ? providerById[author.providerId].colorClass : ''}`;
     const meta = document.createElement('div');
     meta.className = 'werewolf-event-meta';
-    meta.textContent = item.actorSeat ? item.actorSeat + '号议员' : '议会主持人';
-    const text = document.createElement('div');
-    text.className = 'werewolf-event-body';
-    text.textContent = item.text;
-    row.append(meta, text);
+    meta.textContent = event.authorSeat
+      ? `${event.authorSeat}号 · ${author?.controller === 'human' ? '你' : providerLabel(author?.providerId)}`
+      : event.visibility.type === 'private' ? '私密信息' : '说书人';
+    const body = document.createElement('div');
+    body.className = 'werewolf-event-body';
+    body.innerHTML = renderMarkdown(event.content);
+    decorateRenderedMarkdown(body);
+    row.append(meta, body);
+    if (author?.controller === 'ai') row.append(createReplyActions(event.content));
     events.append(row);
   }
   dashboard.append(events);
+
   if (game.pendingTurn) {
-    const thinking = document.createElement('p');
+    const thinking = document.createElement('div');
     thinking.className = 'werewolf-thinking';
-    thinking.textContent = game.pendingTurn.kind === 'vote'
-      ? '一名议员正在密封表决…' : game.pendingTurn.seat + '号正在发言…';
+    const hidden = game.phase === 'first_night' || game.phase === 'other_night';
+    thinking.textContent = hidden ? '夜间行动处理中…' : `${game.pendingTurn.seat}号正在行动…`;
     dashboard.append(thinking);
   }
-  if (game.pendingHumanAction?.kind === 'vote') {
-    const panel = document.createElement('div');
-    panel.className = 'fog-council-human-actions';
-    for (const channel of ['A', 'B', 'C'] as const) {
-      const button = document.createElement('button');
-      button.className = 'fog-council-target-button';
-      button.textContent = '密封投票：' + channel;
-      button.addEventListener('click', () => void submitFogCouncilHumanAction({ channel }));
-      panel.append(button);
-    }
-    dashboard.append(panel);
-  }
+  if (game.pendingHumanAction) renderClocktowerHumanActionPanel(game, game.pendingHumanAction, dashboard);
   messagesEl.append(dashboard);
   requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
 }
 
-function renderFogCouncil(): void {
-  const game = activeFogCouncilGame();
-  if (!game) renderFogCouncilSetup();
-  else renderFogCouncilGame(game);
+function renderClocktower(): void {
+  const game = activeClocktowerGame();
+  if (!game) renderClocktowerSetup();
+  else renderClocktowerGame(game);
 }
 
 function renderMessages(): void {
@@ -677,8 +866,8 @@ function renderMessages(): void {
     renderWerewolf();
     return;
   }
-  if (state.activeMode === 'fog_council') {
-    renderFogCouncil();
+  if (state.activeMode === 'clocktower') {
+    renderClocktower();
     return;
   }
   const session = activeSession();
@@ -852,89 +1041,116 @@ async function handleWerewolfHumanTextSend(): Promise<void> {
   await submitWerewolfHumanAction({ text });
 }
 
-function renderFogCouncilControls(): void {
-  const game = activeFogCouncilGame();
-  const actionButton = el<HTMLButtonElement>('fogCouncilActionButton');
-  const status = el<HTMLElement>('fogCouncilStatus');
-  const humanSend = el<HTMLButtonElement>('fogCouncilHumanSendButton');
-  const textTurn = fogCouncilHumanTextTurn(game?.pendingHumanAction);
-  el<HTMLElement>('composer').classList.toggle('hidden', !textTurn);
-  el<HTMLElement>('composer').classList.toggle('werewolf-human-composer', textTurn);
-  el<HTMLButtonElement>('attachButton').classList.add('hidden');
+function renderClocktowerControls(): void {
+  const game = activeClocktowerGame();
+  const actionButton = el<HTMLButtonElement>('clocktowerActionButton');
+  const status = el<HTMLElement>('clocktowerStatus');
+  const composer = el<HTMLElement>('composer');
+  const attachButton = el<HTMLButtonElement>('attachButton');
+  const humanSend = el<HTMLButtonElement>('clocktowerHumanSendButton');
+  const textTurn = clocktowerHumanTextTurn(game?.pendingHumanAction);
+
+  composer.classList.toggle('hidden', !textTurn);
+  composer.classList.toggle('werewolf-human-composer', textTurn);
+  attachButton.classList.toggle('hidden', true);
   qaSendButton.classList.add('hidden');
   humanSend.classList.toggle('hidden', !textTurn);
   attachmentTray.classList.add('hidden');
   messageInput.rows = 2;
-  messageInput.placeholder = '输入你的议会发言…';
+  messageInput.placeholder = game?.pendingHumanAction?.kind === 'whisper' ? '输入私聊内容…' : textTurn ? '输入你的发言…' : '输入消息…';
+
   if (!game) {
     actionButton.textContent = '开始';
     actionButton.classList.remove('danger');
-    status.textContent = state.fogCouncilSetup.playerCount + ' 人 · 待开始';
+    status.textContent = `${state.clocktowerSetup.playerCount} 人 · 待开始`;
     return;
   }
-  actionButton.textContent = game.status === 'running' ? '中断' : game.status === 'paused' ? '继续' : game.status === 'ended' ? '新局' : '开始';
-  actionButton.classList.toggle('danger', game.status === 'running');
-  status.textContent = fogCouncilStatusLabel(game);
+  actionButton.textContent = game.status === 'running' || game.status === 'waiting_human'
+    ? '中断'
+    : game.status === 'paused' || game.status === 'error'
+      ? '继续'
+      : game.status === 'ended' ? '新局' : '开始';
+  actionButton.classList.toggle('danger', game.status === 'running' || game.status === 'waiting_human');
+  status.textContent = clocktowerStatusLabel(game);
 }
 
-async function handleFogCouncilAction(): Promise<void> {
-  const game = activeFogCouncilGame();
+async function handleClocktowerAction(): Promise<void> {
+  const game = activeClocktowerGame();
   try {
     if (!game) {
-      const setup = state.fogCouncilSetup;
+      const setup = state.clocktowerSetup;
       const needed = setup.playerCount - (setup.includeHuman ? 1 : 0);
-      const providers = state.settings.fogCouncilProviders.filter(provider => providerById[provider]?.enabled);
-      if (providers.length < needed) return showComposerError('当前至少需要 ' + needed + ' 个 AI 模型');
-      const selected = providers.slice(0, needed);
-      await refreshProviderAvailability(selected, false);
-      rejectKnownBrokenProviders(selected);
-      const normalized: FogCouncilSetupSettings = { ...setup, providerIds: selected };
-      const response = await runtimeMessage<{ success: true; gameId: string }>({ type: 'CREATE_FOG_COUNCIL_GAME', setup: normalized });
-      state.activeFogCouncilGameId = response.gameId;
-      await runtimeMessage({ type: 'START_FOG_COUNCIL_GAME', gameId: response.gameId });
+      const providers = state.settings.clocktowerProviders.filter((provider) => providerById[provider]?.enabled);
+      if (providers.length < needed) return showComposerError(`当前 ${setup.playerCount} 人配置至少需要 ${needed} 个已接入 AI 模型`);
+      const selectedProviders = providers.slice(0, needed);
+      await refreshProviderAvailability(selectedProviders, false);
+      rejectKnownBrokenProviders(selectedProviders);
+      const normalized: ClocktowerSetupSettings = { ...setup, providerIds: selectedProviders };
+      const response = await runtimeMessage<{ success: true; gameId: string }>({ type: 'CREATE_CLOCKTOWER_GAME', setup: normalized });
+      state.activeClocktowerGameId = response.gameId;
+      await runtimeMessage({ type: 'START_CLOCKTOWER_GAME', gameId: response.gameId });
       return;
     }
-    if (game.status === 'running') await runtimeMessage({ type: 'INTERRUPT_FOG_COUNCIL_GAME', gameId: game.id });
-    else if (game.status === 'paused') await runtimeMessage({ type: 'RESUME_FOG_COUNCIL_GAME', gameId: game.id });
-    else if (game.status === 'ended') {
-      await runtimeMessage({ type: 'SET_ACTIVE_FOG_COUNCIL_GAME' });
-      state.activeFogCouncilGameId = undefined;
+    if (game.status === 'running' || game.status === 'waiting_human') {
+      await runtimeMessage({ type: 'INTERRUPT_CLOCKTOWER_GAME', gameId: game.id });
+      return;
+    }
+    if (game.status === 'error' && game.phase === 'setup') {
+      await runtimeMessage({ type: 'START_CLOCKTOWER_GAME', gameId: game.id });
+      return;
+    }
+    if (game.status === 'paused' || game.status === 'error') {
+      await runtimeMessage({ type: 'RESUME_CLOCKTOWER_GAME', gameId: game.id });
+      return;
+    }
+    if (game.status === 'ended') {
+      await runtimeMessage({ type: 'SET_ACTIVE_CLOCKTOWER_GAME' });
+      state.activeClocktowerGameId = undefined;
       renderMode();
-    } else await runtimeMessage({ type: 'START_FOG_COUNCIL_GAME', gameId: game.id });
+      return;
+    }
+    await runtimeMessage({ type: 'START_CLOCKTOWER_GAME', gameId: game.id });
   } catch (error) {
     showComposerError(error instanceof Error ? error.message : String(error));
   }
 }
 
-async function handleFogCouncilHumanTextSend(): Promise<void> {
-  const pending = activeFogCouncilGame()?.pendingHumanAction;
-  if (!pending || pending.kind !== 'speech') return;
+async function handleClocktowerHumanTextSend(): Promise<void> {
+  const game = activeClocktowerGame();
+  const pending = game?.pendingHumanAction;
+  if (!pending || !clocktowerHumanTextTurn(pending)) return;
   const text = messageInput.value.trim();
-  if (!text) return showComposerError('请输入你的议会发言');
-  await submitFogCouncilHumanAction({ text });
+  if (!text) return showComposerError(pending.kind === 'whisper' ? '请输入私聊内容' : '请输入你的发言');
+  if (pending.kind === 'whisper' && pending.expectedActions.includes('whisper')) {
+    const target = clocktowerSelectedTargets[0];
+    if (!target) return showComposerError('请先选择私聊目标');
+    await submitClocktowerHumanAction({ text, actionType: 'whisper', targetSeats: [target] });
+    return;
+  }
+  await submitClocktowerHumanAction({ text });
 }
 
 function renderMode(): void {
   document.querySelectorAll<HTMLButtonElement>('.mode-tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.mode === state.activeMode));
   const sequential = isSequentialMode(state.activeMode);
   const werewolf = state.activeMode === 'werewolf';
-  const fogCouncil = state.activeMode === 'fog_council';
+  const clocktower = state.activeMode === 'clocktower';
   roundControls.classList.toggle('hidden', !sequential);
   el<HTMLElement>('werewolfControls').classList.toggle('hidden', !werewolf);
-  el<HTMLElement>('fogCouncilControls').classList.toggle('hidden', !fogCouncil);
-  qaSendButton.classList.toggle('hidden', sequential || werewolf || fogCouncil);
+  el<HTMLElement>('clocktowerControls').classList.toggle('hidden', !clocktower);
+  qaSendButton.classList.toggle('hidden', sequential || werewolf || clocktower);
   el<HTMLButtonElement>('werewolfHumanSendButton').classList.add('hidden');
-  el<HTMLButtonElement>('fogCouncilHumanSendButton').classList.add('hidden');
-  if (!werewolf && !fogCouncil) {
+  el<HTMLButtonElement>('clocktowerHumanSendButton').classList.add('hidden');
+  if (!werewolf && !clocktower) {
     el<HTMLElement>('composer').classList.remove('hidden');
     el<HTMLButtonElement>('attachButton').classList.remove('hidden');
     messageInput.placeholder = '输入消息，或粘贴图片/附件…';
   }
-  el<HTMLButtonElement>('newConversationButton').title = state.activeMode === 'werewolf' ? '新狼人杀对局' : state.activeMode === 'fog_council' ? '新迷雾议会对局' : `新${modeLabel(state.activeMode)}会话`;
+  el<HTMLButtonElement>('newConversationButton').title = state.activeMode === 'werewolf' ? '新狼人杀对局' : state.activeMode === 'clocktower' ? '新迷雾议会对局' : `新${modeLabel(state.activeMode)}会话`;
   renderMessages();
   if (sequential) renderSequentialControls();
   if (werewolf) renderWerewolfControls();
-  if (fogCouncil) renderFogCouncilControls();
+  if (clocktower) renderClocktowerControls();
 }
 
 function renderAttachmentTray(): void {
@@ -1549,88 +1765,114 @@ function renderWerewolfSettings(): void {
   }
 }
 
-async function persistFogCouncilSettings(): Promise<void> {
-  state.fogCouncilSetup.providerIds = [...state.settings.fogCouncilProviders];
+async function persistClocktowerSettings(): Promise<void> {
+  state.clocktowerSetup.providerIds = [...state.settings.clocktowerProviders];
   await saveState(state);
-  await runtimeMessage({ type: 'UPDATE_FOG_COUNCIL_SETUP', setup: state.fogCouncilSetup });
+  await runtimeMessage({ type: 'UPDATE_CLOCKTOWER_SETUP', setup: state.clocktowerSetup });
 }
 
-function renderFogCouncilSettings(): void {
-  const container = el<HTMLElement>('fogCouncilProviderSettings');
-  const countSelect = el<HTMLSelectElement>('fogCouncilPlayerCount');
-  const humanToggle = el<HTMLInputElement>('fogCouncilIncludeHuman');
-  const humanSeat = el<HTMLSelectElement>('fogCouncilHumanSeat');
-  const setup = state.fogCouncilSetup;
-  countSelect.value = String(setup.playerCount);
-  humanToggle.checked = setup.includeHuman;
+function renderClocktowerSettings(): void {
+  const container = el<HTMLElement>('clocktowerProviderSettings');
+  const countSelect = el<HTMLSelectElement>('clocktowerPlayerCount');
+  const scriptSelect = el<HTMLSelectElement>('clocktowerScript');
+  const setupMode = el<HTMLSelectElement>('clocktowerSetupMode');
+  const humanToggle = el<HTMLInputElement>('clocktowerIncludeHuman');
+  const humanSeat = el<HTMLSelectElement>('clocktowerHumanSeat');
+  countSelect.value = String(state.clocktowerSetup.playerCount);
+  scriptSelect.value = state.clocktowerSetup.scriptId;
+  setupMode.value = state.clocktowerSetup.setupMode;
+  humanToggle.checked = state.clocktowerSetup.includeHuman;
   humanSeat.replaceChildren();
-  const random = document.createElement('option');
-  random.value = '0';
-  random.textContent = '随机';
-  humanSeat.append(random);
-  for (let seat = 1; seat <= setup.playerCount; seat++) {
+  const randomOption = document.createElement('option');
+  randomOption.value = '0';
+  randomOption.textContent = '随机';
+  humanSeat.append(randomOption);
+  for (let seat = 1; seat <= state.clocktowerSetup.playerCount; seat += 1) {
     const option = document.createElement('option');
     option.value = String(seat);
-    option.textContent = seat + '号';
+    option.textContent = String(seat) + '号';
     humanSeat.append(option);
   }
-  humanSeat.value = String(setup.humanSeat <= setup.playerCount ? setup.humanSeat : 0);
-  humanSeat.disabled = !setup.includeHuman;
+  humanSeat.value = String(state.clocktowerSetup.humanSeat <= state.clocktowerSetup.playerCount ? state.clocktowerSetup.humanSeat : 0);
+  humanSeat.disabled = !state.clocktowerSetup.includeHuman;
+
   countSelect.onchange = async () => {
-    setup.playerCount = Number(countSelect.value) as 6 | 7 | 8;
-    if (setup.humanSeat > setup.playerCount) setup.humanSeat = 0;
-    await persistFogCouncilSettings();
-    renderFogCouncilSettings();
-    if (state.activeMode === 'fog_council' && !activeFogCouncilGame()) renderMode();
+    const value = Number(countSelect.value) as 6 | 7 | 8;
+    state.clocktowerSetup.playerCount = value;
+    if (state.clocktowerSetup.humanSeat > value) state.clocktowerSetup.humanSeat = 0;
+    await persistClocktowerSettings();
+    renderClocktowerSettings();
+    if (state.activeMode === 'clocktower' && !activeClocktowerGame()) renderMode();
+  };
+  scriptSelect.onchange = async () => {
+    state.clocktowerSetup.scriptId = 'trouble-brewing';
+    await persistClocktowerSettings();
+  };
+  setupMode.onchange = async () => {
+    state.clocktowerSetup.setupMode = setupMode.value as ClocktowerSetupSettings['setupMode'];
+    await persistClocktowerSettings();
+    if (state.activeMode === 'clocktower' && !activeClocktowerGame()) renderMode();
   };
   humanToggle.onchange = async () => {
-    setup.includeHuman = humanToggle.checked;
-    if (!setup.includeHuman) setup.humanSeat = 0;
-    await persistFogCouncilSettings();
-    renderFogCouncilSettings();
-    if (state.activeMode === 'fog_council' && !activeFogCouncilGame()) renderMode();
+    state.clocktowerSetup.includeHuman = humanToggle.checked;
+    if (!humanToggle.checked) state.clocktowerSetup.humanSeat = 0;
+    await persistClocktowerSettings();
+    renderClocktowerSettings();
+    if (state.activeMode === 'clocktower' && !activeClocktowerGame()) renderMode();
   };
   humanSeat.onchange = async () => {
-    setup.humanSeat = Number(humanSeat.value);
-    await persistFogCouncilSettings();
+    state.clocktowerSetup.humanSeat = Number(humanSeat.value) as ClocktowerSetupSettings['humanSeat'];
+    await persistClocktowerSettings();
   };
+
   container.replaceChildren();
-  const selected = state.settings.fogCouncilProviders;
-  const ordered = [
-    ...selected.map(id => providerById[id]).filter(Boolean),
-    ...PROVIDERS.filter(provider => !selected.includes(provider.id))
-  ];
+  const selected = state.settings.clocktowerProviders;
+  const ordered = [...selected.map((providerId) => providerById[providerId]).filter(Boolean), ...PROVIDERS.filter((provider) => !selected.includes(provider.id))];
   for (const provider of ordered) {
     const { row, checkbox } = providerOptionBase(provider.id, selected.includes(provider.id));
     checkbox.addEventListener('change', async () => {
-      const next = [...state.settings.fogCouncilProviders];
+      const next = [...state.settings.clocktowerProviders];
       if (checkbox.checked && !next.includes(provider.id)) next.push(provider.id);
       if (!checkbox.checked) {
         const index = next.indexOf(provider.id);
         if (index >= 0) next.splice(index, 1);
       }
-      state.settings.fogCouncilProviders = next;
-      await persistFogCouncilSettings();
-      renderFogCouncilSettings();
-      if (state.activeMode === 'fog_council' && !activeFogCouncilGame()) renderMode();
+      state.settings.clocktowerProviders = next;
+      await persistClocktowerSettings();
+      renderClocktowerSettings();
+      if (state.activeMode === 'clocktower' && !activeClocktowerGame()) renderMode();
     });
     if (provider.enabled && checkbox.checked) {
-      const index = selected.indexOf(provider.id);
-      for (const [label, step] of [['↑', -1], ['↓', 1]] as const) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'order-button';
-        button.textContent = label;
-        button.disabled = index + step < 0 || index + step >= selected.length;
-        button.addEventListener('click', async () => {
-          const next = [...state.settings.fogCouncilProviders];
-          [next[index], next[index + step]] = [next[index + step], next[index]];
-          state.settings.fogCouncilProviders = next;
-          await persistFogCouncilSettings();
-          renderFogCouncilSettings();
-        });
-        row.append(button);
-      }
+      const index = state.settings.clocktowerProviders.indexOf(provider.id);
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.className = 'order-button';
+      up.textContent = '↑';
+      up.title = '提前座位顺序';
+      up.disabled = index <= 0;
+      up.addEventListener('click', async () => {
+        if (index <= 0) return;
+        const next = [...state.settings.clocktowerProviders];
+        [next[index - 1], next[index]] = [next[index], next[index - 1]];
+        state.settings.clocktowerProviders = next;
+        await persistClocktowerSettings();
+        renderClocktowerSettings();
+      });
+      const down = document.createElement('button');
+      down.type = 'button';
+      down.className = 'order-button';
+      down.textContent = '↓';
+      down.title = '延后座位顺序';
+      down.disabled = index >= state.settings.clocktowerProviders.length - 1;
+      down.addEventListener('click', async () => {
+        if (index < 0 || index >= state.settings.clocktowerProviders.length - 1) return;
+        const next = [...state.settings.clocktowerProviders];
+        [next[index + 1], next[index]] = [next[index], next[index + 1]];
+        state.settings.clocktowerProviders = next;
+        await persistClocktowerSettings();
+        renderClocktowerSettings();
+      });
+      row.append(up, down);
     }
     container.append(row);
   }
@@ -1646,7 +1888,7 @@ function renderSettings(): void {
   renderQaSettings();
   renderSequentialSettings('roundtable', 'roundtableProviderSettings');
   renderWerewolfSettings();
-  renderFogCouncilSettings();
+  renderClocktowerSettings();
 }
 
 function actionIconButton(icon: string, title: string): HTMLButtonElement {
@@ -1842,36 +2084,53 @@ function exportWerewolfGame(game: WerewolfGameSession): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function fogCouncilGameMarkdown(game: FogCouncilGameSession): string {
+function clocktowerGameMarkdown(game: ClocktowerGameSession): string {
+  const human = clocktowerHumanPlayer(game);
   const lines = [
-    '# ' + game.title, '',
-    '- 类型：AI 迷雾议会',
-    '- 状态：' + fogCouncilStatusLabel(game),
-    '- 清晰阵营：' + game.clarityScore + ' 分',
-    '- 迷雾阵营：' + game.mistScore + ' 分',
-    '- 创建时间：' + new Date(game.createdAt).toLocaleString(), ''
+    `# ${game.title}`,
+    '',
+    '- 类型：迷雾议会',
+    '- 剧本：经典身份剧本',
+    `- 人数：${game.rulesetSnapshot.playerCount}`,
+    `- 状态：${clocktowerStatusLabel(game)}`,
+    `- 创建时间：${new Date(game.createdAt).toLocaleString()}`,
+    `- 更新时间：${new Date(game.updatedAt).toLocaleString()}`
   ];
-  if (game.humanSeat) {
-    const human = game.players.find(p => p.seat === game.humanSeat)!;
-    lines.push('- 我的身份：' + COUNCIL_ROLE_BY_ID[human.role].name);
+  if (human) {
+    lines.push(`- 你的座位：${human.seat}号`);
+    lines.push(`- 你认知的角色：${clocktowerRoleById[human.perceivedCharacter].name}`);
   }
   if (game.status === 'ended') {
-    lines.push('- 获胜阵营：' + (game.winner === 'clarity' ? '清晰' : '迷雾'));
-    lines.push('- 最终身份：' + game.players.map(p => p.seat + '号 ' + COUNCIL_ROLE_BY_ID[p.role].name).join('；'));
+    lines.push(`- 获胜阵营：${game.winner === 'good' ? '善良' : '邪恶'}`);
+    lines.push(`- 胜负原因：${game.winnerReason ?? '未记录'}`);
+    lines.push(`- 最终角色：${[...game.players].sort((a, b) => a.seat - b.seat).map((player) => `${player.seat}号 ${clocktowerRoleById[player.trueCharacter].name}`).join('；')}`);
   }
-  lines.push('', '## 公开与本人可见的记录', '');
-  for (const event of fogCouncilVisibleEvents(game)) {
-    lines.push('### ' + (event.actorSeat ? event.actorSeat + '号' : '主持人'), '', event.text, '');
+  lines.push('', '## 游戏记录', '');
+  const events = game.status === 'ended'
+    ? game.events
+    : clocktowerVisibleEvents(game);
+  for (const event of events) {
+    if (!event.content || event.type === 'phase') continue;
+    if (game.status !== 'ended' && event.visibility.type === 'storyteller') continue;
+    const author = event.authorSeat ? `${event.authorSeat}号` : event.visibility.type === 'private' ? '私密信息' : event.visibility.type === 'storyteller' ? '说书人（隐藏记录）' : '说书人';
+    lines.push(`### ${author}`, '', event.content, '');
+  }
+  if (game.status === 'ended' && game.storytellerDecisions.length) {
+    lines.push('## Storyteller 裁量记录', '');
+    for (const decision of game.storytellerDecisions) {
+      lines.push(`- ${decision.kind}：${decision.selected}（${decision.reason}）`);
+    }
+    lines.push('');
   }
   return lines.join('\n').trimEnd() + '\n';
 }
 
-function exportFogCouncilGame(game: FogCouncilGameSession): void {
-  const blob = new Blob([fogCouncilGameMarkdown(game)], { type: 'text/markdown;charset=utf-8' });
+function exportClocktowerGame(game: ClocktowerGameSession): void {
+  const blob = new Blob([clocktowerGameMarkdown(game)], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = 'fog-council-' + game.round + '.md';
+  anchor.download = `${game.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 48) || 'clocktower'}.md`;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
@@ -1893,14 +2152,14 @@ async function deleteWerewolfGame(game: WerewolfGameSession): Promise<void> {
   }
 }
 
-async function deleteFogCouncilGame(game: FogCouncilGameSession): Promise<void> {
-  if (game.status === 'running' || game.pendingTurn) {
-    showComposerError('请先中断并确认本局没有待完成网页操作');
+async function deleteClocktowerGame(game: ClocktowerGameSession): Promise<void> {
+  if (game.status === 'running' || game.status === 'waiting_human' || game.pendingTurn) {
+    showComposerError('请先中断正在运行的迷雾议会对局');
     return;
   }
-  if (!window.confirm('删除“' + game.title + '”？此操作只删除本地记录。')) return;
+  if (!window.confirm(`删除迷雾议会对局“${game.title}”？此操作只删除扩展本地记录。`)) return;
   try {
-    await runtimeMessage({ type: 'DELETE_FOG_COUNCIL_GAME', gameId: game.id });
+    await runtimeMessage({ type: 'DELETE_CLOCKTOWER_GAME', gameId: game.id });
     await refreshStateFromStorage();
     renderHistory();
   } catch (error) {
@@ -2004,45 +2263,48 @@ function renderHistory(): void {
   }
   body.append(gameSection);
 
-  const councilSection = document.createElement('section');
-  councilSection.className = 'history-section';
-  const councilHeading = document.createElement('h3');
-  councilHeading.textContent = 'AI 迷雾议会';
-  councilSection.append(councilHeading);
-  const councilGames = [...state.fogCouncilGames].sort((a, b) => b.updatedAt - a.updatedAt);
-  if (!councilGames.length) {
+  const clockSection = document.createElement('section');
+  clockSection.className = 'history-section';
+  const clockHeading = document.createElement('h3');
+  clockHeading.textContent = '迷雾议会';
+  clockSection.append(clockHeading);
+  const clockGames = [...state.clocktowerGames].sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!clockGames.length) {
     const empty = document.createElement('p');
     empty.className = 'history-empty';
     empty.textContent = '暂无对局';
-    councilSection.append(empty);
+    clockSection.append(empty);
   }
-  for (const game of councilGames) {
+  for (const game of clockGames) {
     const card = document.createElement('div');
-    card.className = 'history-card ' + (state.activeFogCouncilGameId === game.id ? 'active' : '');
+    card.className = `history-card ${state.activeClocktowerGameId === game.id ? 'active' : ''}`;
     const title = document.createElement('button');
     title.type = 'button';
     title.className = 'history-title';
-    title.textContent = game.title + ' · ' + fogCouncilStatusLabel(game);
+    title.textContent = `${game.title} · ${clocktowerStatusLabel(game)}`;
     title.addEventListener('click', async () => {
       try {
-        await runtimeMessage({ type: 'SET_ACTIVE_FOG_COUNCIL_GAME', gameId: game.id });
-        state.activeMode = 'fog_council';
-        state.activeFogCouncilGameId = game.id;
+        await runtimeMessage({ type: 'SET_ACTIVE_CLOCKTOWER_GAME', gameId: game.id });
+        state.activeMode = 'clocktower';
+        state.activeClocktowerGameId = game.id;
         el<HTMLElement>('historyOverlay').classList.add('hidden');
+        clocktowerSelectedTargets = [];
         clearComposer();
         renderMode();
+        await saveState(state);
       } catch (error) {
         showComposerError(error instanceof Error ? error.message : String(error));
       }
     });
     const exportButton = actionIconButton(ICON_EXPORT, '导出为 Markdown');
-    exportButton.addEventListener('click', () => exportFogCouncilGame(game));
+    exportButton.addEventListener('click', () => exportClocktowerGame(game));
     const deleteButton = actionIconButton(ICON_DELETE, '删除对局');
-    deleteButton.addEventListener('click', () => void deleteFogCouncilGame(game));
+    deleteButton.addEventListener('click', () => void deleteClocktowerGame(game));
     card.append(title, exportButton, deleteButton);
-    councilSection.append(card);
+    clockSection.append(card);
   }
-  body.append(councilSection);}
+  body.append(clockSection);
+}
 
 async function newConversation(): Promise<void> {
   const mode = state.activeMode;
@@ -2059,12 +2321,13 @@ async function newConversation(): Promise<void> {
     }
     return;
   }
-  if (mode === 'fog_council') {
-    const game = activeFogCouncilGame();
-    if (game?.status === 'running') return showComposerError('请先中断正在进行的议会');
+  if (mode === 'clocktower') {
+    const game = activeClocktowerGame();
+    if (game?.status === 'running' || game?.status === 'waiting_human') return showComposerError('请先中断当前迷雾议会对局再新开一局');
     try {
-      await runtimeMessage({ type: 'SET_ACTIVE_FOG_COUNCIL_GAME' });
-      state.activeFogCouncilGameId = undefined;
+      await runtimeMessage({ type: 'SET_ACTIVE_CLOCKTOWER_GAME' });
+      state.activeClocktowerGameId = undefined;
+      clocktowerSelectedTargets = [];
       clearComposer();
       renderMode();
     } catch (error) {
@@ -2072,7 +2335,7 @@ async function newConversation(): Promise<void> {
     }
     return;
   }
-    const current = activeSession();
+  const current = activeSession();
   if (current.execution?.status === 'running') return showComposerError('请先中断当前循环再新建会话');
   createSession(mode);
   interruptRequested = false;
@@ -2125,11 +2388,11 @@ function wireEvents(): void {
   });
   el<HTMLButtonElement>('expertPresetButton').addEventListener('click', () => { renderExpertPresets(); openOverlay('expertOverlay'); });
   el<HTMLButtonElement>('historyButton').addEventListener('click', () => { renderHistory(); openOverlay('historyOverlay'); });
-  el<HTMLButtonElement>('fogCouncilScriptButton').addEventListener('click', () => { renderFogCouncilScript(); openOverlay('fogCouncilScriptOverlay'); });
+  el<HTMLButtonElement>('clocktowerScriptButton').addEventListener('click', () => { renderClocktowerScript(); openOverlay('clocktowerScriptOverlay'); });
   wireOverlay('settingsOverlay', 'closeSettingsButton');
   wireOverlay('expertOverlay', 'closeExpertButton');
   wireOverlay('historyOverlay', 'closeHistoryButton');
-  wireOverlay('fogCouncilScriptOverlay', 'closeFogCouncilScriptButton');
+  wireOverlay('clocktowerScriptOverlay', 'closeClocktowerScriptButton');
 
   el<HTMLButtonElement>('newExpertButton').addEventListener('click', () => openExpertEditor());
   el<HTMLButtonElement>('saveExpertButton').addEventListener('click', () => void saveExpertPreset());
@@ -2163,17 +2426,17 @@ function wireEvents(): void {
       void handleWerewolfHumanTextSend();
       return;
     }
-    if (event.key === 'Enter' && !event.shiftKey && state.activeMode === 'fog_council' && fogCouncilHumanTextTurn(activeFogCouncilGame()?.pendingHumanAction)) {
+    if (event.key === 'Enter' && !event.shiftKey && state.activeMode === 'clocktower' && clocktowerHumanTextTurn(activeClocktowerGame()?.pendingHumanAction)) {
       event.preventDefault();
-      void handleFogCouncilHumanTextSend();
+      void handleClocktowerHumanTextSend();
     }
   });
   qaSendButton.addEventListener('click', () => void handleQaSend());
   roundActionButton.addEventListener('click', () => void handleSequentialAction());
   el<HTMLButtonElement>('werewolfActionButton').addEventListener('click', () => void handleWerewolfAction());
   el<HTMLButtonElement>('werewolfHumanSendButton').addEventListener('click', () => void handleWerewolfHumanTextSend());
-  el<HTMLButtonElement>('fogCouncilActionButton').addEventListener('click', () => void handleFogCouncilAction());
-  el<HTMLButtonElement>('fogCouncilHumanSendButton').addEventListener('click', () => void handleFogCouncilHumanTextSend());
+  el<HTMLButtonElement>('clocktowerActionButton').addEventListener('click', () => void handleClocktowerAction());
+  el<HTMLButtonElement>('clocktowerHumanSendButton').addEventListener('click', () => void handleClocktowerHumanTextSend());
   roundRange.addEventListener('input', () => {
     const session = activeSession();
     if (!isSequentialMode(session.mode)) return;

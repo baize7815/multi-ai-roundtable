@@ -1,11 +1,11 @@
 import type { WerewolfGameSession, WerewolfSetupSettings } from '../game/werewolf/types';
-import type { FogCouncilGameSession, FogCouncilSetupSettings } from '../game/fog-council/session';
+import type { ClocktowerGameSession, ClocktowerSetupSettings } from '../game/clocktower/types';
 
 export const PROVIDER_IDS = ['doubao', 'deepseek', 'kimi', 'qwen', 'zhipu', 'gpt', 'gemini', 'grok', 'wenxin', 'minimax'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export type ConversationMode = 'qa' | 'roundtable' | 'expert';
-export type Mode = ConversationMode | 'werewolf' | 'fog_council';
+export type Mode = ConversationMode | 'werewolf' | 'clocktower';
 export type SequentialMode = 'roundtable' | 'expert';
 
 export interface AttachmentPayload {
@@ -51,7 +51,7 @@ export interface AppSettings {
   qaProviders: ProviderId[];
   roundtableProviders: ProviderId[];
   werewolfProviders: ProviderId[];
-  fogCouncilProviders: ProviderId[];
+  clocktowerProviders: ProviderId[];
   expertPresetByProvider: Partial<Record<ProviderId, string>>;
 }
 
@@ -115,9 +115,9 @@ export interface PersistedState {
   werewolfGames: WerewolfGameSession[];
   activeWerewolfGameId?: string;
   werewolfSetup: WerewolfSetupSettings;
-  fogCouncilGames: FogCouncilGameSession[];
-  activeFogCouncilGameId?: string;
-  fogCouncilSetup: FogCouncilSetupSettings;
+  clocktowerGames: ClocktowerGameSession[];
+  activeClocktowerGameId?: string;
+  clocktowerSetup: ClocktowerSetupSettings;
 }
 
 export type ProviderEventType =

@@ -10,7 +10,7 @@ export const DEFAULT_STATE: PersistedState = {
     qaProviders: ['doubao', 'deepseek'],
     roundtableProviders: ['doubao', 'deepseek'],
     werewolfProviders: ['doubao', 'deepseek', 'kimi', 'qwen', 'zhipu', 'gpt', 'gemini', 'grok'],
-    fogCouncilProviders: ['doubao', 'deepseek', 'kimi', 'qwen', 'zhipu', 'gpt', 'gemini', 'grok'],
+    clocktowerProviders: ['doubao', 'deepseek', 'kimi', 'qwen', 'zhipu', 'gpt', 'gemini', 'grok'],
     expertPresetByProvider: {}
   },
   expertPresets: [],
@@ -24,12 +24,14 @@ export const DEFAULT_STATE: PersistedState = {
     humanSeat: 0,
     presetId: 'werewolf-v1-6'
   },
-  fogCouncilGames: [],
-  fogCouncilSetup: {
+  clocktowerGames: [],
+  clocktowerSetup: {
     playerCount: 6,
     providerIds: ['doubao', 'deepseek', 'kimi', 'qwen', 'zhipu', 'gpt'],
     includeHuman: false,
-    humanSeat: 0
+    humanSeat: 0,
+    scriptId: 'trouble-brewing',
+    setupMode: 'curated'
   }
 };
 
@@ -86,7 +88,7 @@ function migrateLegacy(legacy: LegacyState): PersistedState {
       qaProviders: legacy.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
       roundtableProviders: legacy.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: DEFAULT_STATE.settings.werewolfProviders,
-      fogCouncilProviders: DEFAULT_STATE.settings.fogCouncilProviders,
+      clocktowerProviders: DEFAULT_STATE.settings.clocktowerProviders,
       expertPresetByProvider: {}
     },
     expertPresets: [],
@@ -94,8 +96,8 @@ function migrateLegacy(legacy: LegacyState): PersistedState {
     activeConversationIds: { qa: qa.id, roundtable: roundtable.id, expert: expert.id },
     werewolfGames: [],
     werewolfSetup: structuredClone(DEFAULT_STATE.werewolfSetup),
-    fogCouncilGames: [],
-    fogCouncilSetup: structuredClone(DEFAULT_STATE.fogCouncilSetup)
+    clocktowerGames: [],
+    clocktowerSetup: structuredClone(DEFAULT_STATE.clocktowerSetup)
   };
 }
 
@@ -106,24 +108,18 @@ export async function loadState(): Promise<PersistedState> {
     const legacy = result[LEGACY_STORAGE_KEY] as LegacyState | undefined;
     return legacy ? migrateLegacy(legacy) : structuredClone(DEFAULT_STATE);
   }
-  // Previous local development builds included an unrelated experimental game.
-  // Keep user conversations and Werewolf sessions, but do not load/re-export
-  // obsolete game records into the new, original Fog Council mode.
-  const safeStored = { ...stored } as Partial<PersistedState> & Record<string, unknown>;
-  for (const key of ['clocktowerGames', 'activeClocktowerGameId', 'clocktowerSetup']) delete safeStored[key];
-  const activeMode = ['qa', 'roundtable', 'expert', 'werewolf', 'fog_council'].includes(String(stored.activeMode))
-    ? stored.activeMode!
-    : 'qa';
   return {
     ...DEFAULT_STATE,
-    ...safeStored,
-    activeMode,
+    ...stored,
+    // The public 0.2.0 build used a different experimental game mode ID.
+    // Do not let its saved tab selection break the restored local game UI.
+    activeMode: stored.activeMode === ('fog_council' as string) ? 'clocktower' : (stored.activeMode ?? 'qa'),
     settings: {
       replyAcceleration: stored.settings?.replyAcceleration ?? true,
       qaProviders: stored.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
       roundtableProviders: stored.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: stored.settings?.werewolfProviders ?? DEFAULT_STATE.settings.werewolfProviders,
-      fogCouncilProviders: stored.settings?.fogCouncilProviders ?? DEFAULT_STATE.settings.fogCouncilProviders,
+      clocktowerProviders: stored.settings?.clocktowerProviders ?? DEFAULT_STATE.settings.clocktowerProviders,
       expertPresetByProvider: stored.settings?.expertPresetByProvider ?? {}
     },
     expertPresets: stored.expertPresets ?? [],
@@ -132,9 +128,9 @@ export async function loadState(): Promise<PersistedState> {
     werewolfGames: stored.werewolfGames ?? [],
     activeWerewolfGameId: stored.activeWerewolfGameId,
     werewolfSetup: stored.werewolfSetup ?? structuredClone(DEFAULT_STATE.werewolfSetup),
-    fogCouncilGames: stored.fogCouncilGames ?? [],
-    activeFogCouncilGameId: stored.activeFogCouncilGameId,
-    fogCouncilSetup: stored.fogCouncilSetup ?? structuredClone(DEFAULT_STATE.fogCouncilSetup)
+    clocktowerGames: stored.clocktowerGames ?? [],
+    activeClocktowerGameId: stored.activeClocktowerGameId,
+    clocktowerSetup: stored.clocktowerSetup ?? structuredClone(DEFAULT_STATE.clocktowerSetup)
   };
 }
 

@@ -1,5 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#416be4"/><stop offset="1" stop-color="#8d72c9"/></linearGradient></defs>
-<rect x="5" y="5" width="54" height="54" rx="16" fill="url(#g)"/>
-<path d="M17 36a15 15 0 0 1 30 0M12 41c7-7 13-7 20 0s13 7 20 0M19 48c6-5 10-5 15 0s9 5 14 0" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="3.5" opacity=".92"/>
-<circle cx="32" cy="28" r="4" fill="#fff"/></svg>
+<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M3 17.3333H17.3333" stroke="#333333" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M15.5417 13.0334H11.2417V17.3334H15.5417V13.0334Z" stroke="#333333" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M15.1836 5.14999V7.29999" stroke="#333333" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M11.6001 5.14999V7.29999" stroke="#333333" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M11.6001 5.15L13.3918 3L15.1834 5.15H11.6001Z" stroke="#333333" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M10.5253 8.73334H5.50866C5.11285 8.73334 4.79199 9.05419 4.79199 9.45V17.3333" stroke="#333333" stroke-width="0.6" stroke-linejoin="round"/>
+<path d="M6.94189 11.9583H8.37523" stroke="#333333" stroke-width="0.6" stroke-linecap="round"/>
+<path d="M6.94189 14.4667H8.37523" stroke="#333333" stroke-width="0.6" stroke-linecap="round"/>
+<path d="M15.8999 7.29999H10.8832C10.6853 7.29999 10.5249 7.46042 10.5249 7.65832V12.675C10.5249 12.8729 10.6853 13.0333 10.8832 13.0333H15.8999C16.0978 13.0333 16.2582 12.8729 16.2582 12.675V7.65832C16.2582 7.46042 16.0978 7.29999 15.8999 7.29999Z" stroke="#333333" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M13.3919 11.2417C13.9856 11.2417 14.4669 10.7604 14.4669 10.1667C14.4669 9.57297 13.9856 9.09167 13.3919 9.09167C12.7982 9.09167 12.3169 9.57297 12.3169 10.1667C12.3169 10.7604 12.7982 11.2417 13.3919 11.2417Z" fill="#333333"/>
+<path d="M13.3916 13.0334V16.6167" stroke="#333333" stroke-width="0.6" stroke-linecap="round"/>
+</svg>

@@ -20,7 +20,7 @@
           <button class="mode-tab" data-mode="roundtable" aria-label="AI 圆桌" title="AI 圆桌"><img src="../SVG/AI 圆桌.svg" alt="" /></button>
           <button class="mode-tab" data-mode="expert" aria-label="专家团" title="专家团"><img src="../SVG/专家团.svg" alt="" /></button>
           <button class="mode-tab" data-mode="werewolf" aria-label="狼人杀" title="狼人杀"><img src="../SVG/狼人杀.svg" alt="" /></button>
-          <button class="mode-tab" data-mode="fog_council" aria-label="迷雾议会" title="迷雾议会"><img src="../SVG/迷雾议会.svg" alt="" /></button>
+          <button class="mode-tab" data-mode="clocktower" aria-label="迷雾议会" title="迷雾议会"><img src="../SVG/迷雾议会.svg" alt="" /></button>
         </nav>
         <div class="topbar-actions">
           <button id="expertPresetButton" class="icon-button" aria-label="专家团预设" title="专家团预设"><svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M40 20C40 26.8077 35.7484 32.6224 29.7555 34.9336H24H18.2445C12.2516 32.6224 8 26.8077 8 20C8 11.1634 15.1634 4 24 4C32.8366 4 40 11.1634 40 20Z" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M29.7557 34.9336L29.0766 43.0831C29.0334 43.6014 28.6001 44 28.08 44H19.9203C19.4002 44 18.9669 43.6014 18.9238 43.0831L18.2446 34.9336" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 17V23L24 20L30 23V17" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -38,7 +38,7 @@
           <textarea id="messageInput" rows="2" placeholder="输入消息，或粘贴图片/附件…"></textarea>
           <button id="qaSendButton" class="primary-button send-button" aria-label="发送">发送</button>
           <button id="werewolfHumanSendButton" class="primary-button send-button hidden" aria-label="提交发言">提交</button>
-          <button id="fogCouncilHumanSendButton" class="primary-button send-button hidden" aria-label="提交行动">提交</button>
+          <button id="clocktowerHumanSendButton" class="primary-button send-button hidden" aria-label="提交行动">提交</button>
         </div>
         <div id="roundControls" class="round-controls hidden">
           <label for="roundRange">轮数</label><input id="roundRange" type="range" min="1" max="8" step="1" value="2" />
@@ -48,10 +48,10 @@
         <div id="werewolfControls" class="werewolf-controls hidden">
           <button id="werewolfActionButton" class="primary-button">开始</button><span id="werewolfStatus" class="roundtable-status">待开始</span>
         </div>
-        <div id="fogCouncilControls" class="fogCouncil-controls hidden">
-          <button id="fogCouncilActionButton" class="primary-button">开始</button>
-          <button id="fogCouncilScriptButton" class="secondary-button">查看身份</button>
-          <span id="fogCouncilStatus" class="roundtable-status">待开始</span>
+        <div id="clocktowerControls" class="clocktower-controls hidden">
+          <button id="clocktowerActionButton" class="primary-button">开始</button>
+          <button id="clocktowerScriptButton" class="secondary-button">查看身份</button>
+          <span id="clocktowerStatus" class="roundtable-status">待开始</span>
         </div>
       </section>
     </div>
@@ -60,7 +60,7 @@
 
     <div id="settingsOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <section class="drawer-panel"><header class="drawer-header"><div><h2 id="settingsTitle">设置</h2><p>分别选择各模式使用的模型，并配置游戏玩家。</p></div><button id="closeSettingsButton" class="icon-button" aria-label="关闭设置">×</button></header>
-        <div class="drawer-body"><section class="settings-section"><h3>回复加速</h3><label class="werewolf-human-toggle"><input id="replyAcceleration" type="checkbox" />启用回复加速</label><p class="settings-note">对话模式会切换到正在回复的 AI 网页；游戏始终在后台运行。手动切换标签后，本次自动切换暂停。若有异常，可关闭此项回到原有等待方式。</p></section><section class="settings-section"><h3>AI 对话</h3><div id="qaProviderSettings" class="provider-grid"></div></section><section class="settings-section"><h3>AI 圆桌</h3><p class="settings-note">圆桌与专家团共享参与模型和发言顺序；专家下拉只在专家团模式生效。</p><div id="roundtableProviderSettings" class="provider-grid"></div></section><section class="settings-section"><h3>狼人杀</h3><p class="settings-note">每局 6–8 人，可从当前已接入模型中选择并调整 AI 座位顺序。勾选模型多于所需人数时按顺序取前 N 个。</p><div class="werewolf-setup-fields"><label>人数<select id="werewolfPlayerCount"><option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option></select></label><label class="werewolf-human-toggle"><input id="werewolfIncludeHuman" type="checkbox" />我也参与</label><label>我的座位<select id="werewolfHumanSeat"><option value="0">随机</option></select></label></div><div id="werewolfProviderSettings" class="provider-grid"></div></section><section class="settings-section"><h3>迷雾议会</h3><p class="settings-note">原创五轮信号推理：6–8 人，全员保持议席，累计三分的阵营获胜。</p><div class="fogCouncil-setup-fields"><label>人数<select id="fogCouncilPlayerCount"><option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option></select></label><label class="fogCouncil-human-toggle"><input id="fogCouncilIncludeHuman" type="checkbox" />我也参与</label><label>我的座位<select id="fogCouncilHumanSeat"><option value="0">随机</option></select></label></div><div id="fogCouncilProviderSettings" class="provider-grid"></div></section></div>
+        <div class="drawer-body"><section class="settings-section"><h3>回复加速</h3><label class="werewolf-human-toggle"><input id="replyAcceleration" type="checkbox" />启用回复加速</label><p class="settings-note">对话模式会切换到正在回复的 AI 网页；游戏始终在后台运行。手动切换标签后，本次自动切换暂停。若有异常，可关闭此项回到原有等待方式。</p></section><section class="settings-section"><h3>AI 对话</h3><div id="qaProviderSettings" class="provider-grid"></div></section><section class="settings-section"><h3>AI 圆桌</h3><p class="settings-note">圆桌与专家团共享参与模型和发言顺序；专家下拉只在专家团模式生效。</p><div id="roundtableProviderSettings" class="provider-grid"></div></section><section class="settings-section"><h3>狼人杀</h3><p class="settings-note">每局 6–8 人，可从当前已接入模型中选择并调整 AI 座位顺序。勾选模型多于所需人数时按顺序取前 N 个。</p><div class="werewolf-setup-fields"><label>人数<select id="werewolfPlayerCount"><option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option></select></label><label class="werewolf-human-toggle"><input id="werewolfIncludeHuman" type="checkbox" />我也参与</label><label>我的座位<select id="werewolfHumanSeat"><option value="0">随机</option></select></label></div><div id="werewolfProviderSettings" class="provider-grid"></div></section><section class="settings-section"><h3>迷雾议会</h3><p class="settings-note">沿用原版多身份推理玩法：6–8 人，支持推荐阵容或随机合法阵容。</p><div class="clocktower-setup-fields"><label>人数<select id="clocktowerPlayerCount"><option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option></select></label><label>剧本<select id="clocktowerScript"><option value="trouble-brewing">经典身份剧本</option></select></label><label>组本<select id="clocktowerSetupMode"><option value="curated">推荐阵容</option><option value="random_legal">随机合法阵容</option></select></label><label class="clocktower-human-toggle"><input id="clocktowerIncludeHuman" type="checkbox" />我也参与</label><label>我的座位<select id="clocktowerHumanSeat"><option value="0">随机</option></select></label></div><div id="clocktowerProviderSettings" class="provider-grid"></div></section></div>
       </section>
     </div>
 
@@ -74,8 +74,8 @@
       <section class="drawer-panel history-panel"><header class="drawer-header"><div><h2 id="historyTitle">会话管理</h2></div><button id="closeHistoryButton" class="icon-button" aria-label="关闭会话管理">×</button></header><div id="historyBody" class="drawer-body history-body"></div></section>
     </div>
 
-    <div id="fogCouncilScriptOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="fogCouncilScriptTitle">
-      <section class="drawer-panel fogCouncil-script-panel"><header class="drawer-header"><div><h2 id="fogCouncilScriptTitle">原创信号剧本 剧本</h2><p>这些是原创身份牌的公开能力说明，实际分配仅对相应玩家可见。</p></div><button id="closeFogCouncilScriptButton" class="icon-button" aria-label="关闭剧本">×</button></header><div id="fogCouncilScriptBody" class="drawer-body fogCouncil-script-body"></div></section>
+    <div id="clocktowerScriptOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="clocktowerScriptTitle">
+      <section class="drawer-panel clocktower-script-panel"><header class="drawer-header"><div><h2 id="clocktowerScriptTitle">迷雾议会角色手册</h2><p>这是全部角色的公开能力说明，实际入场角色仅对对应玩家可见。</p></div><button id="closeClocktowerScriptButton" class="icon-button" aria-label="关闭角色手册">×</button></header><div id="clocktowerScriptBody" class="drawer-body clocktower-script-body"></div></section>
     </div>
 
     <script type="module" src="app.js"></script>

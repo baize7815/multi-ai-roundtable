@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Multi AI Roundtable",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Connect 10 logged-in AI web apps for parallel chat, AI roundtables, experts and original social deduction games.",
   "permissions": [
     "sidePanel",
