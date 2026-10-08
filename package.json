@@ -1,0 +1,22 @@
+{
+  "name": "multi-ai-roundtable",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test:werewolf": "node scripts/test-werewolf.mjs",
+    "test:fog-council": "node scripts/test-fog-council.mjs"
+  },
+  "dependencies": {
+    "dompurify": "^3.2.6",
+    "marked": "^15.0.12"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.3"
+  }
+}

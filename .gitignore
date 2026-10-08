@@ -1,0 +1,80 @@
+# Dependencies, caches and local tool state
+node_modules/
+.pnpm-store/
+.npm/
+.cache/
+coverage/
+.tmp/
+.tmp-*-tests/
+temp/
+tmp/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.webcodex/
+
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.keystore
+*.mobileprovision
+*credentials*.json
+*secrets*.json
+*token*.json
+*cookie*.json
+Cookies
+Cookies-journal
+Local State
+Login Data
+Login Data-journal
+Network/
+IndexedDB/
+Local Storage/
+Session Storage/
+Service Worker/
+chrome-cdp/
+Chrome-CDP/
+user-data-dir/
+profiles/
+browser-profile/
+browser-data/
+
+# Logs, CDP traces, private sessions and local diagnostics
+log/
+logs/
+*.log
+*.trace
+*.har
+*.webm
+*.cpuprofile
+*.heapsnapshot
+playwright-report/
+test-results/
+artifacts/
+debug/
+tools/
+scratch/
+*.local
+*.bak
+*.tmp
+*.swp
+
+# Keep the ready-to-install dist/ but never publish debugging source maps
+**/*.map
+
+# Release archives are distributed through GitHub Releases, not duplicated in Git
+*.zip
+*.7z
+*.tar
+*.tar.gz
+release/
+releases/

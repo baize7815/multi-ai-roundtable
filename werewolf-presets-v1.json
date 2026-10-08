@@ -1,0 +1,5 @@
+[
+  {"id":"werewolf-v1-6","playerCount":6,"roles":{"wolf":2,"seer":1,"witch":1,"hunter":0,"villager":2}},
+  {"id":"werewolf-v1-7","playerCount":7,"roles":{"wolf":2,"seer":1,"witch":1,"hunter":1,"villager":2}},
+  {"id":"werewolf-v1-8","playerCount":8,"roles":{"wolf":2,"seer":1,"witch":1,"hunter":1,"villager":3}}
+]

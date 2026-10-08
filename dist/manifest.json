@@ -1,0 +1,187 @@
+{
+  "manifest_version": 3,
+  "name": "Multi AI Roundtable",
+  "version": "0.2.0",
+  "description": "Connect 10 logged-in AI web apps for parallel chat, AI roundtables, experts and original social deduction games.",
+  "permissions": [
+    "sidePanel",
+    "tabs",
+    "tabGroups",
+    "storage",
+    "scripting",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://www.doubao.com/*",
+    "https://chat.deepseek.com/*",
+    "https://www.kimi.com/*",
+    "https://www.qianwen.com/*",
+    "https://chatglm.cn/*",
+    "https://chatgpt.com/*",
+    "https://gemini.google.com/*",
+    "https://grok.com/*",
+    "https://wenxin.baidu.com/*",
+    "https://agent.minimax.cn/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icon/icon-36.png",
+    "48": "icon/icon-48.png",
+    "128": "icon/icon-128.png"
+  },
+  "action": {
+    "default_title": "Multi AI Roundtable",
+    "default_icon": "icon/icon-36.png"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.doubao.com/chat*",
+        "https://chat.deepseek.com/*",
+        "https://www.kimi.com/*",
+        "https://www.qianwen.com/*",
+        "https://chatglm.cn/*",
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*",
+        "https://grok.com/*",
+        "https://wenxin.baidu.com/*",
+        "https://agent.minimax.cn/*"
+      ],
+      "js": [
+        "content/page-liveness.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://chat.deepseek.com/*",
+        "https://www.kimi.com/*",
+        "https://www.qianwen.com/*",
+        "https://chatglm.cn/*",
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*",
+        "https://grok.com/*",
+        "https://wenxin.baidu.com/*"
+      ],
+      "js": [
+        "content/provider-bootstrap.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://agent.minimax.cn/*"
+      ],
+      "js": [
+        "content/minimax-bootstrap.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.doubao.com/chat*"
+      ],
+      "js": [
+        "content/doubao-bootstrap.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.doubao.com/chat*"
+      ],
+      "js": [
+        "content/doubao.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chat.deepseek.com/*"
+      ],
+      "js": [
+        "content/deepseek.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.kimi.com/*"
+      ],
+      "js": [
+        "content/kimi.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.qianwen.com/*"
+      ],
+      "js": [
+        "content/qwen.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chatglm.cn/*"
+      ],
+      "js": [
+        "content/zhipu.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content/gpt.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "content/gemini.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://grok.com/*"
+      ],
+      "js": [
+        "content/grok.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://wenxin.baidu.com/*"
+      ],
+      "js": [
+        "content/wenxin.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://agent.minimax.cn/*"
+      ],
+      "js": [
+        "content/minimax.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

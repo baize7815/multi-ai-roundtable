@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Multi AI Roundtable</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="topbar-left-actions">
+          <button id="newConversationButton" class="icon-button topbar-new" aria-label="新会话" title="新会话">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 0.599609C3.91309 0.599609 0.599609 3.91309 0.599609 8C0.599609 9.13376 0.855461 10.2098 1.3125 11.1719L1.5918 11.7588L2.76562 11.2012L2.48633 10.6143C2.11034 9.82278 1.90039 8.93675 1.90039 8C1.90039 4.63106 4.63106 1.90039 8 1.90039C11.3689 1.90039 14.0996 4.63106 14.0996 8C14.0996 11.3689 11.3689 14.0996 8 14.0996C7.31041 14.0996 6.80528 14.0514 6.35742 13.9277C5.91623 13.8059 5.49768 13.6021 4.99707 13.2529C4.26492 12.7422 3.21611 12.5616 2.35156 13.1074L2.33789 13.1162L2.32422 13.126L1.58789 13.6436L2.01953 14.9297L3.0459 14.207C3.36351 14.0065 3.83838 14.0294 4.25293 14.3184C4.84547 14.7317 5.39743 15.011 6.01172 15.1807C6.61947 15.3485 7.25549 15.4004 8 15.4004C12.0869 15.4004 15.4004 12.0869 15.4004 8C15.4004 3.91309 12.0869 0.599609 8 0.599609ZM7.34473 4.93945V7.34961H4.93945V8.65039H7.34473V11.0605H8.64551V8.65039H11.0605V7.34961H8.64551V4.93945H7.34473Z" fill="currentColor"/></svg>
+          </button>
+          <button id="fullscreenButton" class="icon-button topbar-fullscreen" aria-label="全屏打开" title="全屏打开"><svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M30 6H42V18M18 6H6V18M30 42H42V30M18 42H6V30M42 6L29 19M19 29L6 42" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+        <nav class="mode-tabs" aria-label="模式切换">
+          <button class="mode-tab active" data-mode="qa" aria-label="AI 对话" title="AI 对话"><img src="../SVG/AI 对话.svg" alt="" /></button>
+          <button class="mode-tab" data-mode="roundtable" aria-label="AI 圆桌" title="AI 圆桌"><img src="../SVG/AI 圆桌.svg" alt="" /></button>
+          <button class="mode-tab" data-mode="expert" aria-label="专家团" title="专家团"><img src="../SVG/专家团.svg" alt="" /></button>
+          <button class="mode-tab" data-mode="werewolf" aria-label="狼人杀" title="狼人杀"><img src="../SVG/狼人杀.svg" alt="" /></button>
+          <button class="mode-tab" data-mode="fog_council" aria-label="迷雾议会" title="迷雾议会"><img src="../SVG/迷雾议会.svg" alt="" /></button>
+        </nav>
+        <div class="topbar-actions">
+          <button id="expertPresetButton" class="icon-button" aria-label="专家团预设" title="专家团预设"><svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M40 20C40 26.8077 35.7484 32.6224 29.7555 34.9336H24H18.2445C12.2516 32.6224 8 26.8077 8 20C8 11.1634 15.1634 4 24 4C32.8366 4 40 11.1634 40 20Z" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M29.7557 34.9336L29.0766 43.0831C29.0334 43.6014 28.6001 44 28.08 44H19.9203C19.4002 44 18.9669 43.6014 18.9238 43.0831L18.2446 34.9336" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 17V23L24 20L30 23V17" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button id="historyButton" class="icon-button" aria-label="会话管理" title="会话管理"><svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M5.81836 6.72729V14H13.0911" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 24C4 35.0457 12.9543 44 24 44V44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C16.598 4 10.1351 8.02111 6.67677 13.9981" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24.005 12L24.0038 24.0088L32.4832 32.4882" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button id="settingsButton" class="icon-button" aria-label="设置" title="设置"><svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M18.2838 43.1713C14.9327 42.1736 11.9498 40.3213 9.58787 37.867C10.469 36.8227 11 35.4734 11 34.0001C11 30.6864 8.31371 28.0001 5 28.0001C4.79955 28.0001 4.60139 28.01 4.40599 28.0292C4.13979 26.7277 4 25.3803 4 24.0001C4 21.9095 4.32077 19.8938 4.91579 17.9995C4.94381 17.9999 4.97188 18.0001 5 18.0001C8.31371 18.0001 11 15.3138 11 12.0001C11 11.0488 10.7786 10.1493 10.3846 9.35011C12.6975 7.1995 15.5205 5.59002 18.6521 4.72314C19.6444 6.66819 21.6667 8.00013 24 8.00013C26.3333 8.00013 28.3556 6.66819 29.3479 4.72314C32.4795 5.59002 35.3025 7.1995 37.6154 9.35011C37.2214 10.1493 37 11.0488 37 12.0001C37 15.3138 39.6863 18.0001 43 18.0001C43.0281 18.0001 43.0562 17.9999 43.0842 17.9995C43.6792 19.8938 44 21.9095 44 24.0001C44 25.3803 43.8602 26.7277 43.594 28.0292C43.3986 28.01 43.2005 28.0001 43 28.0001C39.6863 28.0001 37 30.6864 37 34.0001C37 35.4734 37.531 36.8227 38.4121 37.867C36.0502 40.3213 33.0673 42.1736 29.7162 43.1713C28.9428 40.752 26.676 39.0001 24 39.0001C21.324 39.0001 19.0572 40.752 18.2838 43.1713Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M24 31C27.866 31 31 27.866 31 24C31 20.134 27.866 17 24 17C20.134 17 17 20.134 17 24C17 27.866 20.134 31 24 31Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg></button>
+        </div>
+      </header>
+
+      <main id="messages" class="messages" aria-live="polite"></main>
+      <section id="composerDock" class="composer-dock">
+        <div id="attachmentTray" class="attachment-tray hidden"></div>
+        <div id="composer" class="composer">
+          <input id="fileInput" type="file" multiple hidden />
+          <button id="attachButton" class="icon-button composer-icon" aria-label="添加图片或附件" title="添加图片或附件">＋</button>
+          <textarea id="messageInput" rows="2" placeholder="输入消息，或粘贴图片/附件…"></textarea>
+          <button id="qaSendButton" class="primary-button send-button" aria-label="发送">发送</button>
+          <button id="werewolfHumanSendButton" class="primary-button send-button hidden" aria-label="提交发言">提交</button>
+          <button id="fogCouncilHumanSendButton" class="primary-button send-button hidden" aria-label="提交行动">提交</button>
+        </div>
+        <div id="roundControls" class="round-controls hidden">
+          <label for="roundRange">轮数</label><input id="roundRange" type="range" min="1" max="8" step="1" value="2" />
+          <input id="roundNumber" class="round-number" type="number" min="1" max="99" step="1" value="2" inputmode="numeric" aria-label="循环轮数" />
+          <button id="roundActionButton" class="primary-button round-action">开始</button><span id="roundtableStatus" class="roundtable-status">待开始</span>
+        </div>
+        <div id="werewolfControls" class="werewolf-controls hidden">
+          <button id="werewolfActionButton" class="primary-button">开始</button><span id="werewolfStatus" class="roundtable-status">待开始</span>
+        </div>
+        <div id="fogCouncilControls" class="fogCouncil-controls hidden">
+          <button id="fogCouncilActionButton" class="primary-button">开始</button>
+          <button id="fogCouncilScriptButton" class="secondary-button">查看身份</button>
+          <span id="fogCouncilStatus" class="roundtable-status">待开始</span>
+        </div>
+      </section>
+    </div>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+    <div id="settingsOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <section class="drawer-panel"><header class="drawer-header"><div><h2 id="settingsTitle">设置</h2><p>分别选择各模式使用的模型，并配置游戏玩家。</p></div><button id="closeSettingsButton" class="icon-button" aria-label="关闭设置">×</button></header>
+        <div class="drawer-body"><section class="settings-section"><h3>回复加速</h3><label class="werewolf-human-toggle"><input id="replyAcceleration" type="checkbox" />启用回复加速</label><p class="settings-note">对话模式会切换到正在回复的 AI 网页；游戏始终在后台运行。手动切换标签后，本次自动切换暂停。若有异常，可关闭此项回到原有等待方式。</p></section><section class="settings-section"><h3>AI 对话</h3><div id="qaProviderSettings" class="provider-grid"></div></section><section class="settings-section"><h3>AI 圆桌</h3><p class="settings-note">圆桌与专家团共享参与模型和发言顺序；专家下拉只在专家团模式生效。</p><div id="roundtableProviderSettings" class="provider-grid"></div></section><section class="settings-section"><h3>狼人杀</h3><p class="settings-note">每局 6–8 人，可从当前已接入模型中选择并调整 AI 座位顺序。勾选模型多于所需人数时按顺序取前 N 个。</p><div class="werewolf-setup-fields"><label>人数<select id="werewolfPlayerCount"><option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option></select></label><label class="werewolf-human-toggle"><input id="werewolfIncludeHuman" type="checkbox" />我也参与</label><label>我的座位<select id="werewolfHumanSeat"><option value="0">随机</option></select></label></div><div id="werewolfProviderSettings" class="provider-grid"></div></section><section class="settings-section"><h3>迷雾议会</h3><p class="settings-note">原创五轮信号推理：6–8 人，全员保持议席，累计三分的阵营获胜。</p><div class="fogCouncil-setup-fields"><label>人数<select id="fogCouncilPlayerCount"><option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option></select></label><label class="fogCouncil-human-toggle"><input id="fogCouncilIncludeHuman" type="checkbox" />我也参与</label><label>我的座位<select id="fogCouncilHumanSeat"><option value="0">随机</option></select></label></div><div id="fogCouncilProviderSettings" class="provider-grid"></div></section></div>
+      </section>
+    </div>
+
+    <div id="expertOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="expertTitle">
+      <section class="drawer-panel"><header class="drawer-header"><div><h2 id="expertTitle">专家团设置</h2><p>分别设置专家名称和提示词</p></div><button id="closeExpertButton" class="icon-button" aria-label="关闭专家团设置">×</button></header>
+        <div class="drawer-body"><div class="expert-transfer-toolbar"><button id="importExpertsButton" class="expert-transfer-button" type="button" aria-label="导入专家预设 JSON" title="导入专家预设 JSON"><svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M11.6777 20.271C7.27476 21.3181 4 25.2766 4 30C4 35.5228 8.47715 40 14 40C14.9474 40 15.864 39.8683 16.7325 39.6221" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M36.0547 20.271C40.4577 21.3181 43.7324 25.2766 43.7324 30C43.7324 35.5228 39.2553 40 33.7324 40C32.785 40 31.8684 39.8683 30.9999 39.6221" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M36 20C36 13.3726 30.6274 8 24 8C17.3726 8 12 13.3726 12 20" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M17.0654 27.8812L23.9999 20.9238L31.1318 28.0002" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 38.0001V24.4619" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button id="exportExpertsButton" class="expert-transfer-button" type="button" aria-label="导出专家预设 JSON" title="导出专家预设 JSON"><svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M11.6777 20.271C7.27476 21.3181 4 25.2766 4 30C4 35.5228 8.47715 40 14 40C14.9474 40 15.864 39.8683 16.7325 39.6221" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M36.0547 20.271C40.4577 21.3181 43.7324 25.2766 43.7324 30C43.7324 35.5228 39.2553 40 33.7324 40C32.785 40 31.8684 39.8683 30.9999 39.6221" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M36 20C36 13.3726 30.6274 8 24 8C17.3726 8 12 13.3726 12 20" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M17.0654 30.119L23.9999 37.0764L31.1318 30" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 20V33.5382" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></button><input id="expertImportInput" type="file" accept=".json,application/json" hidden /></div><button id="newExpertButton" class="wide-create-button" type="button">＋&nbsp; 新建专家</button><section id="expertEditor" class="expert-editor hidden"><div class="expert-editor-row"><input id="expertNameInput" type="text" maxlength="60" placeholder="输入名称" /><button id="saveExpertButton" class="text-button" type="button">保存</button><button id="cancelExpertButton" class="text-button muted" type="button">取消</button></div><textarea id="expertPromptInput" rows="8" placeholder="输入预设提示词"></textarea><div id="expertPresetHint" class="form-hint"></div></section><div id="expertPresetList" class="expert-list"></div></div>
+      </section>
+    </div>
+
+    <div id="historyOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
+      <section class="drawer-panel history-panel"><header class="drawer-header"><div><h2 id="historyTitle">会话管理</h2></div><button id="closeHistoryButton" class="icon-button" aria-label="关闭会话管理">×</button></header><div id="historyBody" class="drawer-body history-body"></div></section>
+    </div>
+
+    <div id="fogCouncilScriptOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="fogCouncilScriptTitle">
+      <section class="drawer-panel fogCouncil-script-panel"><header class="drawer-header"><div><h2 id="fogCouncilScriptTitle">原创信号剧本 剧本</h2><p>这些是原创身份牌的公开能力说明，实际分配仅对相应玩家可见。</p></div><button id="closeFogCouncilScriptButton" class="icon-button" aria-label="关闭剧本">×</button></header><div id="fogCouncilScriptBody" class="drawer-body fogCouncil-script-body"></div></section>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

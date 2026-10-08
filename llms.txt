@@ -1,0 +1,44 @@
+# Multi AI Roundtable
+
+> Open-source-oriented Chrome MV3 extension by @baize7815 that orchestrates
+> multiple logged-in AI web applications without requiring vendor API keys.
+
+Project owner: https://github.com/baize7815
+Planned repository: https://github.com/baize7815/multi-ai-roundtable
+License: Apache-2.0 for original project code.
+Release version: 0.2.0.
+
+## Architecture
+- src/background/orchestrator.ts: parallel AI chat, sequential roundtable and expert workflows.
+- src/background.ts: MV3 service worker, provider dispatch and recovery.
+- src/content/: website-specific adapters for ten supported AI services.
+- src/background/private-game-pages.ts: dedicated game page lifecycle.
+- src/background/werewolf-engine.ts: Werewolf game orchestration.
+- src/game/werewolf/: role, rule, action and context isolation logic.
+- src/background/fog-council-engine.ts and src/game/fog-council/: original
+  hidden-signal council game, human/AI turns, sealed ballots and scoring.
+- src/sidepanel/: UI controller, styles and HTML.
+- src/shared/: provider metadata and persistent session types.
+- tests/: deterministic engine and regression tests.
+- dist/: locally built unpacked Chrome extension.
+
+## Development
+- npm ci
+- npm run typecheck
+- npm run test:werewolf
+- npm run test:fog-council
+- npm run build
+
+## Usage and safety
+Use only providers you are entitled to access and comply with their terms.
+Never place cookies or credentials in prompts, source files, issues or logs.
+Game streaming previews are intentionally hidden until final text is committed.
+Never assume a private browser tab is inaccessible to its owner.
+
+## Documentation
+- README.md: Chinese introduction and installation.
+- README_EN.md: English project overview.
+- SECURITY.md: disclosure and privacy.
+- CONTRIBUTING.md: contribution rules.
+- docs/RELEASE_CHECKLIST.md: public-release safety gate.
+- docs/SCREENSHOTS.md: sanitized demo screenshot requirements.
