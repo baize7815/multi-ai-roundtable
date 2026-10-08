@@ -30,7 +30,7 @@ Use your signed-in AI websites for parallel answers, sequential discussions, exp
 
 ## Screenshots
 
-Only genuine, sanitized captures will be included. No synthetic UI will be misrepresented as a product screenshot. See [the screenshot guidelines](docs/SCREENSHOTS.md).
+Seven genuine extension screenshots are available in the [Chinese README gallery](README.md#先看效果), including AI Chat, Roundtable, Expert Team, Werewolf, settings and history. See [screenshot guidelines](docs/SCREENSHOTS.md).
 
 ## Install
 

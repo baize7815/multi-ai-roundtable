@@ -1,104 +1,185 @@
-# Multi AI Roundtable
+<div align="center">
 
-> 十个网页 AI，一个多智能体工作台。
+# Multi AI Roundtable · 多 AI 圆桌
 
-直接使用已经登录的 AI 网页，让多个模型并发回答、轮流讨论、担任专家、参与社交推理游戏。**不需要单独申请各家 API Key。**
+**把你已经登录的 AI 网页，变成一张会讨论、协作，甚至能一起玩推理游戏的圆桌。**
 
-**作者：[@baize7815](https://github.com/baize7815)** · Chrome MV3 · TypeScript · 免费、非商业社区项目 · [English](README_EN.md)
+10 个 AI 网页平台 · 5 种交互模式 · Chrome 侧边栏 · 无需各厂商 API Key
 
-> **公开发行版 v0.2.0**：包含 AI 对话、AI 圆桌、AI 专家团、AI 狼人杀与原创的 AI 迷雾议会五种模式。
+[看实际效果](#先看效果) · [五种模式](#能做什么) · [开始使用](#开始使用) · [关于作者](#关于作者)
 
-## 项目亮点
+**[⬇ 下载最新发行版](https://github.com/baize7815/multi-ai-roundtable/releases/latest)** · **[查看源码](https://github.com/baize7815/multi-ai-roundtable)** · [English](README_EN.md)
 
-- **10 个 AI 网页平台**：豆包、DeepSeek、Kimi、千问、智谱清言、ChatGPT、Gemini、Grok、文心、MiniMax。
-- **AI 对话**：同一问题并发发送给多家 AI，快速比较不同模型的答案。
-- **AI 圆桌**：严格按顺序接力、多轮循环，构建真正的模型间讨论。
-- **AI 专家团**：给每个 AI 绑定独立的专家预设，让不同角色协作分析。
-- **AI 狼人杀**：秘密身份、夜间行动、公开讨论与投票，由独立 GameEngine 裁决。
-- **AI 迷雾议会**：原创的频道信号推理、公开辩论、密封投票与阵营计分。
-- **稳定性设计**：扩展托管会话、后台持久化、中断与继续、私有上下文隔离、游戏回复仅最终提交。
+<img src="docs/screenshots/AI对话.webp" alt="Multi AI Roundtable 实机截图：AI 对话" width="460" />
 
-## 五种模式
+<sub>实际 Chrome 扩展界面 · 使用已经登录的 AI 网页账号</sub>
 
-| 模式 | 适合做什么 | 调度方式 |
-| --- | --- | --- |
-| AI 对话 | 并发对比多个 AI 的回答 | 多 Provider 并发 |
-| AI 圆桌 | 观点交锋、多轮接力 | 严格串行 |
-| AI 专家团 | 多角度专家协作 | 独立预设 + 串行 |
-| AI 狼人杀 | 社交推理、身份与投票 | 独立状态机 + 私密行动 |
-| AI 迷雾议会 | 6–8 名 AI / 真人参与原创五轮信号推理 | 独立游戏状态机 + 私密线索 |
+</div>
 
-**普通三模式优先保持稳定。** 游戏使用独立运行时和专用网页窗口，不更改原有三模式的核心编排方式。
+---
 
-## 产品截图
+## 先看效果
 
-仓库将在完成脱敏后加入真实 UI 截图：项目总览、并发 AI 对话、圆桌接力、专家团、狼人杀公开游戏视角、历史会话。暂不使用模拟图冒充产品实拍。截图规划及安全规范见 [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)。
+### 同一个问题，交给不同 AI 回答
 
-## 支持的网站
+你不用在一堆浏览器标签之间来回切换，也不用反复粘贴提示词。侧栏负责把问题送给选定的 AI，并把各自的回答组织在一起。
 
-| AI | 网站 |
+### AI 圆桌：让模型真的接着彼此的话讨论
+
+你给出一个话题，参与的 AI 按顺序阅读共享讨论内容，再继续给出观点。适合推敲方案、审查想法，或者单纯看看几个模型会怎样回应彼此。
+
+<div align="center">
+  <img src="docs/screenshots/AI 圆桌.webp" alt="AI 圆桌：多模型顺序接力讨论" width="540" />
+</div>
+
+### 专家协作和 AI 推理游戏
+
+<table>
+  <tr>
+    <td width="50%" valign="top"><strong>AI 专家团</strong><p>把不同专业身份分配给各个 AI，由它们按顺序协作完成一个任务。</p><img src="docs/screenshots/专家团.webp" alt="AI 专家团实机截图" width="100%" /></td>
+    <td width="50%" valign="top"><strong>AI 狼人杀</strong><p>秘密身份、夜间行动、白天讨论与投票。AI 玩家参与游戏，主持人由规则引擎负责。</p><img src="docs/screenshots/AI 狼人杀.webp" alt="AI 狼人杀实机截图" width="100%" /></td>
+  </tr>
+</table>
+
+### 专家预设、历史记录和设置
+
+对话可以回到历史中查看，专家团可以调整各模型的分工；模型选择和常用选项也集中在侧栏。
+
+<details>
+<summary><strong>展开更多实机截图（专家团设置 · 会话历史 · 设置）</strong></summary>
+
+<table>
+  <tr>
+    <td width="33%" valign="top"><strong>专家团设置</strong><img src="docs/screenshots/专家团设置.webp" alt="专家团设置界面" width="100%" /></td>
+    <td width="33%" valign="top"><strong>会话历史</strong><img src="docs/screenshots/会话历史.webp" alt="历史会话管理界面" width="100%" /></td>
+    <td width="33%" valign="top"><strong>设置</strong><img src="docs/screenshots/设置.webp" alt="模型与通用设置界面" width="100%" /></td>
+  </tr>
+</table>
+
+</details>
+
+以上七张均为真实扩展界面截图。网页模型的登录状态、配额及功能支持仍取决于各个服务平台。
+
+---
+
+## 能做什么
+
+| 你想做什么 | 交给 Multi AI Roundtable |
 | --- | --- |
-| 豆包 | https://www.doubao.com/ |
-| DeepSeek | https://chat.deepseek.com/ |
-| Kimi | https://www.kimi.com/ |
-| 千问 | https://www.qianwen.com/ |
-| 智谱清言 | https://chatglm.cn/ |
-| ChatGPT | https://chatgpt.com/ |
-| Gemini | https://gemini.google.com/ |
-| Grok | https://grok.com/ |
-| 文心 | https://wenxin.baidu.com/ |
-| MiniMax | https://agent.minimax.cn/ |
+| 「同一道题，让 GPT、Kimi 和 DeepSeek 都回答」 | **AI 对话**：多个网页 AI 并行作答，方便直接比较 |
+| 「让几个 AI 轮流讨论一个产品方案」 | **AI 圆桌**：严格串行接力，多轮共享讨论上下文 |
+| 「产品经理、开发、设计师分别评审这个想法」 | **AI 专家团**：为不同模型设置独立专家角色与任务分工 |
+| 「让 AI 自己玩一局狼人杀」 | **AI 狼人杀**：独立引擎管理秘密身份、行动、发言和投票 |
+| 「尝试多人隐藏信息推理」 | **AI 迷雾议会**：公开 v0.2.0 包含原创信号推理与密封表决模式 |
+| 「找回之前的讨论」 | **会话历史**：集中查看、管理和继续已有会话 |
 
-请自行登录所需网站并遵守对应平台条款。网站更新、登录失效、验证码或地区限制可能影响网页适配。文心和 MiniMax 当前只保证文字模式；图片与附件能力因 Provider 不同而有所限制。
+**不是把十家网站做成十个 iframe。** 扩展针对各站点使用独立的网页适配脚本，根据模式管理发送、回复、回合及会话存储。游戏的隐藏行动不会自动广播到公开讨论中。
 
-## 安装
+## 支持的 AI 网页
 
-### 安装发行版
+**豆包 · DeepSeek · Kimi · 千问 · 智谱清言 · ChatGPT · Gemini · Grok · 文心 · MiniMax**
 
-下载项目 Release 页面提供的 ZIP，解压后打开 Chrome 的 `chrome://extensions/`，开启开发者模式，点击 **加载已解压的扩展程序**，选择解压得到的 `dist/` 文件夹。尚未正式发布时请从源码构建。
+你需要先在对应网站登录。扩展不要求你向仓库作者提供 Cookie、密码或 API Key，也不会替你绕过平台的登录、验证或配额限制。由于网页结构会变化，各网站的适配状态与附件能力可能不同。
+
+## 开始使用
+
+### 安装发行版（推荐）
+
+1. 打开 **[Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest)**，下载 `Multi-AI-Roundtable-v0.2.0.zip`。
+2. 解压 ZIP，打开 Chrome 的 `chrome://extensions/`，开启右上角的 **开发者模式**。
+3. 点击 **加载已解压的扩展程序**，选择解压得到的 **`dist/` 文件夹**。
+4. 登录准备使用的 AI 网站，打开扩展侧栏，选择模型和模式即可。
+
+> GitHub 当前公开发行版是 **v0.2.0**。本地开发分支和未公开实验功能不属于 Release；下载和安装请以发行页为准。
+> **本地分支提示**：当前工作目录仍是尚未公开的经典玩法恢复版（v0.2.1）。本地回归请运行 `npm run test:clocktower`；GitHub `main` 与官方 Release 仍为 v0.2.0。
 
 ### 从源码构建（Node.js 22+）
 
 ```bash
+git clone https://github.com/baize7815/multi-ai-roundtable.git
+cd multi-ai-roundtable
 npm ci
 npm run typecheck
 npm run test:werewolf
-npm run test:clocktower
+npm run test:fog-council
 npm run build
 ```
 
-编译产物位于 `dist/`，可以直接在 Chrome 中作为未打包扩展加载。
+编译产物位于 `dist/`，同样可以在 Chrome 中作为未打包扩展加载。
 
-## 技术架构
+## 怎么实现的
 
 ```text
-Chrome Side Panel
-       ↓
-MV3 Service Worker / Persistent Session State
-       ↓
-AI Orchestrator + Game Engines + Visibility / Context Builder
-       ↓
-Managed Tabs + Provider-specific Content Scripts
-       ↓
-Real logged-in AI websites
+Chrome Side Panel / 统一操作界面
+                │
+                ▼
+MV3 后台 / 会话调度与状态保存
+                │
+       ┌────────┴────────┐
+       ▼                 ▼
+  对话 · 圆桌 · 专家团      游戏状态机
+       └────────┬────────┘
+                ▼
+    各 AI 网站的 Content Scripts
+                ▼
+        你已经登录的 AI 网页
 ```
 
-普通协作模式按既有机制处理网页窗口；游戏模式通过独立的托管窗口控制活跃 AI，并避免将思考过程或不允许公开的游戏动作直接提交给其他角色。会话按 Provider 独立保存，支持中断、继续以及必要的异常恢复。
+普通协作模式管理模型之间的公开讨论接力，游戏模式维护独立的回合与角色上下文。扩展通过网页界面发送提示词并读取最终回复；它不是模型聚合 API，也不需要自建服务端。
 
-核心目录：`src/background/`、`src/content/`、`src/game/`、`src/sidepanel/`、`src/shared/`。测试：`tests/`。
+### 项目结构
 
-## 隐私和法律说明
+```text
+multi-ai-roundtable/
+├── src/
+│   ├── background/      # 多 AI 调度及游戏运行时
+│   ├── content/         # 不同 AI 网站的适配脚本
+│   ├── game/            # 规则与私密上下文
+│   ├── shared/          # 类型、存储与 Provider 配置
+│   └── sidepanel/       # 扩展侧栏 UI
+├── tests/               # 本地回归测试
+├── scripts/             # 构建与测试入口
+├── docs/screenshots/    # README 真实界面截图
+├── dist/                # 可直接加载的 Chrome 扩展
+├── LICENSE
+├── NOTICE
+└── README.md
+```
 
-- **无需 API Key 不等于消息永远不离开浏览器。** 被选择的 AI 网站会接收发给它的提示词和上下文。
-- 不需要将网页 Cookie、Token、密码或 Chrome 用户配置提供给项目作者。
-- Issues、截图、Release 附件与调试日志不得包含个人聊天、账号标识、浏览器 Profile 或隐藏游戏资料。
-- 本项目不隶属于所适配的 AI 服务提供商，各平台的名称和商标属于相应权利人。
-- **AI 迷雾议会** 为本项目原创游戏模式。先前本地实验性第三方剧本未纳入本次公开源码或发行包。详见 [发布检查表](docs/RELEASE_CHECKLIST.md)。
+`dist/` 随公开仓库提供；想直接使用的用户可以下载 ZIP，不必安装 Node.js。
 
-## 参与与署名
+## 为什么做这件事
 
-项目由 **[@baize7815](https://github.com/baize7815)** 原创开发。欢迎提交有复现步骤的 Issue、适配修复和代码改进；请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) 和 [NOTICE](NOTICE)。
+多个模型已经各有所长，但把它们拉进同一场讨论，往往还要手动切换网页、复制上下文、组织下一轮。这个项目就是想让不同模型在各自原本的网页里工作，而把讨论流程集中到一个入口。
 
-本项目原创代码基于 [Apache License 2.0](LICENSE) 开源。再分发需依法保留版权、许可证和适用的 NOTICE 归属声明，并标明所作修改。
+除了正经地对比答案和多专家协作，也希望它能有点趣味，所以加入了由 AI 玩家参与的推理游戏。你可以从日常提问用到一局完整的多人讨论，而不用换工具。
 
-如果项目对你有帮助，欢迎关注、分享和提出改进建议，并在改造发布时保留适用许可证要求的原作者署名。
+## 关于作者
+
+项目由 **[@baize7815](https://github.com/baize7815)** 开发与维护。使用反馈、Provider 适配修复和 Pull Request 都欢迎。
+
+| 平台 | 找到我 |
+| --- | --- |
+| GitHub | [@baize7815](https://github.com/baize7815) |
+| 𝕏 / Twitter | [@Mislay_zero](https://x.com/Mislay_zero) |
+| 小红书 | [沈小鱼](https://www.xiaohongshu.com/user/profile/69f738ba0000000002002004) |
+| B 站 | [这货包子娘](https://space.bilibili.com/408360699) |
+| 微信 | 搜索 **「白泽宝宝想吃炸鸡」** |
+
+## 许可证与隐私
+
+项目原创代码采用 **[Apache License 2.0](LICENSE)**。可以依法使用、修改和再分发，但必须遵守许可证，保留所要求的版权与 [NOTICE](NOTICE) 归属声明，并标明修改。原作者署名 **baize7815**。
+
+支持的 AI 平台名称及标志属于其各自权利人，本项目不代表获得官方认可。使用扩展时，提示词会发送到你选择的第三方 AI 网页；请遵守对应平台条款，不要在公开 Issue、截图或日志里泄露私人对话、Cookie 或登录信息。安全说明见 [SECURITY.md](SECURITY.md)，贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+---
+
+<div align="center">
+
+**让 AI 不只回答问题，也能坐下来认真讨论。**
+
+[⭐ Star 本项目](https://github.com/baize7815/multi-ai-roundtable) · [⬇ 下载扩展](https://github.com/baize7815/multi-ai-roundtable/releases/latest) · [🐛 提交 Issue](https://github.com/baize7815/multi-ai-roundtable/issues)
+
+<sub>Apache-2.0 © 2026 <a href="https://github.com/baize7815">baize7815</a></sub>
+
+</div>
