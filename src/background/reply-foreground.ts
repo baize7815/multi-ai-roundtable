@@ -1,11 +1,12 @@
 import type { PersistedState } from '../shared/types';
 
-interface Target { tabId: number }
+interface Target { tabId: number; streaming: boolean; keepSelected: boolean }
 interface WindowLease {
   originalTabId?: number;
   lastTabId?: number;
   selectedAt: number;
   manual: boolean;
+  keepSelected: boolean;
   collapsedGroups: Set<number>;
 }
 
@@ -39,7 +40,7 @@ export function createReplyForeground(isManaged: (tabId: number) => Promise<bool
       if (lease.manual) return;
       const active = (await chrome.tabs.query({ active: true, windowId }))[0];
       if (lease.manual || active?.id !== lease.lastTabId) return;
-      if (lease.originalTabId && !privateTabs.has(lease.originalTabId) && lease.originalTabId !== active.id) {
+      if (!lease.keepSelected && lease.originalTabId && !privateTabs.has(lease.originalTabId) && lease.originalTabId !== active.id) {
         await activate(lease.originalTabId, windowId).catch(() => undefined);
       }
       // Keep the lease while restoring so manual activations still cancel it.
@@ -69,7 +70,15 @@ export function createReplyForeground(isManaged: (tabId: number) => Promise<bool
         const tab = await chrome.tabs.get(tabId).catch(() => undefined);
         if (!tab || tab.windowId === undefined) continue;
         const group = targets.get(tab.windowId) ?? [];
-        if (!group.some((item) => item.tabId === tabId)) group.push({ tabId });
+        const streaming = session.messages.find((message) => message.id === operation.messageId)?.status === 'streaming';
+        const keepSelected = session.mode === 'qa' && state.settings.qaProviders.length === 1;
+        const existing = group.find((item) => item.tabId === tabId);
+        if (existing) {
+          existing.streaming ||= streaming;
+          existing.keepSelected ||= keepSelected;
+        } else {
+          group.push({ tabId, streaming, keepSelected });
+        }
         targets.set(tab.windowId, group);
       }
     }
@@ -80,17 +89,21 @@ export function createReplyForeground(isManaged: (tabId: number) => Promise<bool
       let lease = leases.get(windowId);
       const active = (await chrome.tabs.query({ active: true, windowId }))[0];
       if (!lease) {
-        lease = { originalTabId: active?.id, selectedAt: 0, manual: false, collapsedGroups: new Set() };
+        lease = { originalTabId: active?.id, selectedAt: 0, manual: false, keepSelected: false, collapsedGroups: new Set() };
         leases.set(windowId, lease);
       }
       if (lease.manual) continue;
       if (lease.lastTabId && active?.id !== lease.lastTabId) { lease.manual = true; continue; }
-      const preferred = group.find((item) => item.tabId === preferredTabId);
-      const currentIndex = group.findIndex((item) => item.tabId === lease.lastTabId);
-      const next = preferred ?? group[currentIndex < 0 ? 0 : (currentIndex + 1) % group.length];
+      // Prefer actual streaming replies; rotate only when multiple models are streaming.
+      const streaming = group.filter((item) => item.streaming);
+      const candidates = streaming.length ? streaming : group;
+      const preferred = candidates.find((item) => item.tabId === preferredTabId);
+      const currentIndex = candidates.findIndex((item) => item.tabId === lease.lastTabId);
+      const next = preferred ?? candidates[currentIndex < 0 ? 0 : (currentIndex + 1) % candidates.length];
       if (!preferred && currentIndex >= 0 && Date.now() - lease.selectedAt < 4000) continue;
       if (active?.id === next.tabId) {
         lease.lastTabId = next.tabId;
+        lease.keepSelected ||= next.keepSelected;
         if (!lease.selectedAt) lease.selectedAt = Date.now();
         continue;
       }
@@ -104,6 +117,7 @@ export function createReplyForeground(isManaged: (tabId: number) => Promise<bool
       if (lease.manual) continue;
       await activate(next.tabId, windowId);
       lease.lastTabId = next.tabId;
+      lease.keepSelected ||= next.keepSelected;
       lease.selectedAt = Date.now();
     }
   }

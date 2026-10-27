@@ -76,6 +76,7 @@ export interface ProviderOperationState {
   provider: ProviderId;
   mode: ConversationMode;
   payload: ComposerPayload;
+  qaPresetKey?: string;
   startedAt: number;
   phase?: 'preparing' | 'active';
 }

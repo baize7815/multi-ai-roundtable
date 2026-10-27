@@ -22,7 +22,7 @@
 
 ### 同一个问题，交给不同 AI 回答
 
-你不用在一堆浏览器标签之间来回切换，也不用反复粘贴提示词。侧栏负责把问题送给选定的 AI，并把各自的回答组织在一起。
+你不用在一堆浏览器标签之间来回切换，也不用反复粘贴提示词。侧栏负责把问题送给选定的 AI，并把各自的回答组织在一起。AI 对话网页不自动分组；启用回复加速时优先展示正在生成回复的模型，只选一个模型则停留在它的标签页。手动切换标签可停止本轮自动跟随。
 
 ### AI 圆桌：让模型真的接着彼此的话讨论
 
@@ -43,7 +43,9 @@
 
 ### 对话预设、专家预设、历史记录和设置
 
-在「设置 → AI 对话」中，可分别为各 AI 选择预设，默认「无预设」。每个模型仅在新会话首次发言时注入一次选定提示词，后续追问不重复注入；预设作为会话快照保存，修改设置不会影响历史对话。预设管理与专家团共用。历史记录、模型选择和常用选项也集中在侧栏。
+在「设置 → AI 对话」中，可分别为各 AI 选择预设，默认「无预设」。已选择的预设从下次发送开始生效，包括已有会话。每个模型的相同预设仅注入一次，切换预设后重新注入；历史消息不会被改写。预设管理与专家团共用。历史记录、模型选择和常用选项也集中在侧栏。
+
+预设管理现支持七牛云手动上传、下载合并及下载替换，仍保留本地 JSON 导入导出。仅同步专家团与 AI 对话共用的预设库，不自动同步历史会话。配置、凭证存储、权限与安全限制详见 [七牛云预设备份说明](docs/QINIU_PRESET_BACKUP.md)。
 
 <details>
 <summary><strong>展开更多实机截图（专家团设置 · 会话历史 · 设置）</strong></summary>
@@ -85,12 +87,12 @@
 
 ### 安装发行版（推荐）
 
-1. 打开 **[Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest)**，下载 `Multi-AI-Roundtable-v0.2.2.zip`。
+1. 打开 **[Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest)**，下载 `Multi-AI-Roundtable-v0.2.3.zip`。
 2. 解压 ZIP，打开 Chrome 的 `chrome://extensions/`，开启右上角的 **开发者模式**。
 3. 点击 **加载已解压的扩展程序**，选择解压得到的 **`dist/` 文件夹**。
 4. 登录准备使用的 AI 网站，打开扩展侧栏，选择模型和模式即可。
 
-> **v0.2.2** 基于公开的 `v0.2.1-local-classic` 分支发行，新增 AI 对话独立预设。GitHub `main` 暂不与此分支合并，下载以 [Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest) 为准。经典游戏引擎的完整自动模拟仍未通过稳定验收。
+> **v0.2.3** 继续基于 `local/classic-mode-restoration` 分支发行，修复 AI 对话预设生效时机，优化标签切换并新增七牛云手动预设备份。GitHub `main` 暂不合并，下载以 [Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest) 为准。七牛云真实存储桶读写与经典游戏引擎完整模拟尚未完成验收。
 
 ### 从源码构建（Node.js 22+）
 

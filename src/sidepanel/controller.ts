@@ -2,7 +2,9 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { PROVIDERS, providerById } from '../shared/providers';
 import { DEFAULT_STATE, STORAGE_KEY, createConversationSession, loadState } from '../shared/storage';
-import { buildExpertPresetTransferFile, mergeExpertPresets, parseExpertPresetTransferFile } from './expert-transfer';
+import { buildExpertPresetTransferFile, mergeExpertPresets, parseExpertPresetTransferFile, replaceExpertPresets } from './expert-transfer';
+import { CLOUD_CONFIG_STORAGE_KEY, CLOUD_SECRET_SESSION_KEY, uploadExpertPresetsJson, downloadExpertPresetsJson, parseQiniuEndpoint } from './qiniu-presets';
+import type { QiniuCloudConfig } from './qiniu-presets';
 import { humanVisibleEvents } from '../game/werewolf/context';
 import { ROLE_LABELS } from '../game/werewolf/rules';
 import type { WerewolfActionType, WerewolfGameSession, WerewolfPendingHumanAction, WerewolfSetupSettings } from '../game/werewolf/types';
@@ -152,10 +154,6 @@ function capturePresetAssignments(presetByProvider: Partial<Record<ProviderId, s
 
 function captureExpertAssignments(): Partial<Record<ProviderId, ExpertAssignmentSnapshot>> {
   return capturePresetAssignments(state.settings.expertPresetByProvider);
-}
-
-function captureQaAssignments(): Partial<Record<ProviderId, ExpertAssignmentSnapshot>> {
-  return capturePresetAssignments(state.settings.qaPresetByProvider);
 }
 
 function createSession(mode: ConversationMode): ConversationSession {
@@ -1333,7 +1331,7 @@ async function ensureSessionBindings(session: ConversationSession, providers: Pr
   if (session.needsFreshConversations) {
     const created = await Promise.all(providers.map(async (provider) => {
       const response = await runtimeMessage<{ success: boolean; tabId: number; conversationUrl?: string }>({
-        type: 'CREATE_FRESH_CONVERSATION', provider, tabId: bindings[provider]?.tabId
+        type: 'CREATE_FRESH_CONVERSATION', provider, mode: session.mode, tabId: bindings[provider]?.tabId
       });
       return [provider, { provider, tabId: response.tabId, conversationUrl: response.conversationUrl }] as const;
     }));
@@ -1347,7 +1345,7 @@ async function ensureSessionBindings(session: ConversationSession, providers: Pr
 
   const missing = providers.filter((provider) => !bindings[provider]);
   const created = await Promise.all(missing.map(async (provider) => {
-    const response = await runtimeMessage<{ success: boolean; tabId: number; conversationUrl?: string }>({ type: 'CREATE_FRESH_CONVERSATION', provider });
+    const response = await runtimeMessage<{ success: boolean; tabId: number; conversationUrl?: string }>({ type: 'CREATE_FRESH_CONVERSATION', provider, mode: session.mode });
     return [provider, { provider, tabId: response.tabId, conversationUrl: response.conversationUrl }] as const;
   }));
   for (const [provider, binding] of created) bindings[provider] = binding;
@@ -1362,11 +1360,6 @@ async function handleQaSend(): Promise<void> {
   const providers = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
   if (!providers.length) return showComposerError('请先在设置里选择至少一个已接入模型');
   await refreshProviderAvailability(providers, false);
-  // Snapshot presets only when this conversation first sends. Existing chats retain their original configuration.
-  if (session.messages.length === 0) {
-    session.qaPresetAssignments = captureQaAssignments();
-    session.qaInitializedProviders = [];
-  }
   session.messages.push({ id: id('msg'), role: 'user', text: payload.text, attachments: attachmentMetadata(payload), createdAt: Date.now(), status: 'completed' });
   if (session.title === '新会话') session.title = deriveTitle(payload);
   touchSession(session);
@@ -2040,6 +2033,124 @@ async function importExpertPresets(file: File): Promise<void> {
   }
 }
 
+
+let qiniuPresetBusy = false;
+
+function showQiniuPresetStatus(message: string, error = false): void {
+  const status = el<HTMLElement>('qiniuPresetStatus');
+  status.textContent = message;
+  status.classList.toggle('error', error);
+}
+
+function updateQiniuPresetConfigState(): void {
+  const configured = Boolean(el<HTMLInputElement>('qiniuEndpoint').value.trim()
+    && el<HTMLInputElement>('qiniuAccessKey').value.trim()
+    && el<HTMLInputElement>('qiniuSecretKey').value.trim());
+  el<HTMLElement>('qiniuPresetConfigState').textContent = configured ? '已配置' : '未配置';
+}
+
+async function loadQiniuPresetFields(): Promise<void> {
+  const [local, session] = await Promise.all([
+    chrome.storage.local.get(CLOUD_CONFIG_STORAGE_KEY),
+    chrome.storage.session.get(CLOUD_SECRET_SESSION_KEY)
+  ]);
+  const data = (local[CLOUD_CONFIG_STORAGE_KEY] ?? {}) as Partial<QiniuCloudConfig>;
+  el<HTMLInputElement>('qiniuEndpoint').value = data.endpoint ?? '';
+  el<HTMLInputElement>('qiniuAccessKey').value = data.accessKey ?? '';
+  el<HTMLInputElement>('qiniuSecretKey').value = typeof session[CLOUD_SECRET_SESSION_KEY] === 'string'
+    ? session[CLOUD_SECRET_SESSION_KEY] : '';
+  updateQiniuPresetConfigState();
+}
+
+async function persistQiniuPresetFields(): Promise<QiniuCloudConfig> {
+  const endpoint = el<HTMLInputElement>('qiniuEndpoint').value.trim();
+  const accessKey = el<HTMLInputElement>('qiniuAccessKey').value.trim();
+  const secretKey = el<HTMLInputElement>('qiniuSecretKey').value.trim();
+  parseQiniuEndpoint(endpoint);
+  if (!accessKey) throw new Error('请填写七牛云 AccessKey。');
+  await Promise.all([
+    chrome.storage.local.set({ [CLOUD_CONFIG_STORAGE_KEY]: { endpoint, accessKey } }),
+    secretKey ? chrome.storage.session.set({ [CLOUD_SECRET_SESSION_KEY]: secretKey })
+      : chrome.storage.session.remove(CLOUD_SECRET_SESSION_KEY)
+  ]);
+  updateQiniuPresetConfigState();
+  return { endpoint, accessKey, secretKey };
+}
+
+function setQiniuPresetBusy(busy: boolean): void {
+  qiniuPresetBusy = busy;
+  for (const buttonId of ['cloudUploadExpertsButton', 'cloudDownloadExpertsButton',
+    'qiniuSaveConfig', 'qiniuUpload', 'qiniuDownloadMerge', 'qiniuDownloadReplace']) {
+    el<HTMLButtonElement>(buttonId).disabled = busy;
+  }
+}
+
+async function saveQiniuPresetConfig(): Promise<void> {
+  if (qiniuPresetBusy) return;
+  try {
+    setQiniuPresetBusy(true);
+    await persistQiniuPresetFields();
+    showQiniuPresetStatus('七牛云配置已保存在当前浏览器。');
+  } catch (error) {
+    showQiniuPresetStatus(error instanceof Error ? error.message : '保存配置失败。', true);
+  } finally { setQiniuPresetBusy(false); }
+}
+
+async function runQiniuPresetAction(action: 'upload' | 'merge' | 'replace'): Promise<void> {
+  if (qiniuPresetBusy) return;
+  const panel = el<HTMLDetailsElement>('qiniuPresetPanel');
+  const endpoint = el<HTMLInputElement>('qiniuEndpoint').value.trim();
+  const accessKey = el<HTMLInputElement>('qiniuAccessKey').value.trim();
+  const secretKey = el<HTMLInputElement>('qiniuSecretKey').value.trim();
+  if (!endpoint || !accessKey || !secretKey) {
+    panel.open = true;
+    showQiniuPresetStatus('请先填写存储桶 HTTPS 地址、AccessKey 和 SecretKey。', true);
+    return;
+  }
+  if (action === 'upload' && !window.confirm('上传将覆盖云端 multi-ai-roundtable/experts.json，继续吗？')) return;
+  if (action === 'replace' && !window.confirm('将以云端预设替换本地预设列表。云端不存在的本地预设会被删除，继续吗？')) return;
+  setQiniuPresetBusy(true);
+  panel.open = true;
+  showQiniuPresetStatus(action === 'upload' ? '正在上传预设…' : '正在下载预设…');
+  try {
+    const config = await persistQiniuPresetFields();
+    if (action === 'upload') {
+      const latest = await loadState();
+      if (!latest.expertPresets.length) throw new Error('本地还没有可备份的预设。');
+      await uploadExpertPresetsJson(config, JSON.stringify(buildExpertPresetTransferFile(latest.expertPresets)));
+      showQiniuPresetStatus(`已上传 ${latest.expertPresets.length} 条预设，云端同路径旧备份已覆盖。`);
+      return;
+    }
+
+    const incoming = parseExpertPresetTransferFile(await downloadExpertPresetsJson(config));
+    await refreshStateFromStorage();
+    const merged = action === 'replace'
+      ? replaceExpertPresets(state.expertPresets, incoming, Date.now(), () => id('expert'))
+      : mergeExpertPresets(state.expertPresets, incoming, Date.now(), () => id('expert'));
+    state.expertPresets = merged.presets;
+    if (action === 'replace') {
+      const validIds = new Set(state.expertPresets.map((preset) => preset.id));
+      for (const provider of PROVIDERS) {
+        if (state.settings.expertPresetByProvider[provider.id] && !validIds.has(state.settings.expertPresetByProvider[provider.id]!)) {
+          delete state.settings.expertPresetByProvider[provider.id];
+        }
+        if (state.settings.qaPresetByProvider[provider.id] && !validIds.has(state.settings.qaPresetByProvider[provider.id]!)) {
+          delete state.settings.qaPresetByProvider[provider.id];
+        }
+      }
+    }
+    syncBlankExpertSessionAssignments();
+    await saveState(state);
+    closeExpertEditor();
+    renderExpertPresets();
+    renderSettings();
+    showQiniuPresetStatus(action === 'replace'
+      ? `云端替换完成：当前 ${state.expertPresets.length} 条预设。`
+      : `云端合并完成：新增 ${merged.added}、更新 ${merged.updated}、未变 ${merged.unchanged}。`);
+  } catch (error) {
+    showQiniuPresetStatus(error instanceof Error ? error.message : '七牛云操作失败。', true);
+  } finally { setQiniuPresetBusy(false); }
+}
 function sessionMarkdown(session: ConversationSession): string {
   const lines = [`# ${session.title}`, '', `- 类型：${modeLabel(session.mode)}`, `- 创建时间：${new Date(session.createdAt).toLocaleString()}`, `- 更新时间：${new Date(session.updatedAt).toLocaleString()}`];
   if (session.mode === 'expert') {
@@ -2413,7 +2524,11 @@ function wireEvents(): void {
     openOverlay('settingsOverlay');
     void refreshProviderAvailability(PROVIDERS.map((provider) => provider.id));
   });
-  el<HTMLButtonElement>('expertPresetButton').addEventListener('click', () => { renderExpertPresets(); openOverlay('expertOverlay'); });
+  el<HTMLButtonElement>('expertPresetButton').addEventListener('click', () => {
+    renderExpertPresets();
+    openOverlay('expertOverlay');
+    void loadQiniuPresetFields().catch(() => showQiniuPresetStatus('读取本地七牛云配置失败。', true));
+  });
   el<HTMLButtonElement>('historyButton').addEventListener('click', () => { renderHistory(); openOverlay('historyOverlay'); });
   el<HTMLButtonElement>('clocktowerScriptButton').addEventListener('click', () => { renderClocktowerScript(); openOverlay('clocktowerScriptOverlay'); });
   wireOverlay('settingsOverlay', 'closeSettingsButton');
@@ -2430,6 +2545,15 @@ function wireEvents(): void {
     expertImportInput.click();
   });
   el<HTMLButtonElement>('exportExpertsButton').addEventListener('click', exportExpertPresets);
+  el<HTMLButtonElement>('cloudUploadExpertsButton').addEventListener('click', () => void runQiniuPresetAction('upload'));
+  el<HTMLButtonElement>('cloudDownloadExpertsButton').addEventListener('click', () => void runQiniuPresetAction('merge'));
+  el<HTMLButtonElement>('qiniuSaveConfig').addEventListener('click', () => void saveQiniuPresetConfig());
+  el<HTMLButtonElement>('qiniuUpload').addEventListener('click', () => void runQiniuPresetAction('upload'));
+  el<HTMLButtonElement>('qiniuDownloadMerge').addEventListener('click', () => void runQiniuPresetAction('merge'));
+  el<HTMLButtonElement>('qiniuDownloadReplace').addEventListener('click', () => void runQiniuPresetAction('replace'));
+  for (const id of ['qiniuEndpoint', 'qiniuAccessKey', 'qiniuSecretKey']) {
+    el<HTMLInputElement>(id).addEventListener('input', updateQiniuPresetConfigState);
+  }
   expertImportInput.addEventListener('change', () => {
     const file = expertImportInput.files?.[0];
     expertImportInput.value = '';

@@ -4,6 +4,7 @@ import { mutatePersistedState } from './state-store';
 import type {
   ChatMessage,
   ComposerPayload,
+  ConversationMode,
   ConversationSession,
   PersistedState,
   ProviderEvent,
@@ -13,8 +14,8 @@ import type {
 } from '../shared/types';
 
 export interface ProviderBridge {
-  createFreshConversation(provider: ProviderId, preferredTabId?: number): Promise<{ tabId: number; conversationUrl?: string }>;
-  send(provider: ProviderId, operationId: string, payload: ComposerPayload, tabId?: number, conversationUrl?: string): Promise<void>;
+  createFreshConversation(provider: ProviderId, preferredTabId?: number, mode?: ConversationMode): Promise<{ tabId: number; conversationUrl?: string }>;
+  send(provider: ProviderId, operationId: string, payload: ComposerPayload, tabId?: number, conversationUrl?: string, mode?: ConversationMode): Promise<void>;
   cancel(provider: ProviderId, operationId?: string, tabId?: number): Promise<void>;
 }
 
@@ -66,11 +67,22 @@ function buildSequentialPrompt(session: ConversationSession, provider: ProviderI
   return `${body}\n\n请基于以上你尚未看到的新增内容继续讨论。避免复述已有内容，直接回应并推进讨论。`;
 }
 
-function withQaPreset(session: ConversationSession, provider: ProviderId, payload: ComposerPayload): ComposerPayload {
-  if (session.mode !== 'qa' || session.qaInitializedProviders?.includes(provider)) return payload;
-  const preset = session.qaPresetAssignments?.[provider];
-  if (!preset?.prompt.trim()) return payload;
-  return { ...payload, text: `${preset.prompt.trim()}\n\n${payload.text}` };
+function withQaPreset(state: PersistedState, session: ConversationSession, provider: ProviderId, payload: ComposerPayload): { payload: ComposerPayload; key?: string } {
+  if (session.mode !== 'qa') return { payload };
+  // Read the current selection at dispatch time. A QA session may predate the settings change.
+  const presetId = state.settings.qaPresetByProvider[provider];
+  const preset = presetId ? state.expertPresets.find((item) => item.id === presetId) : undefined;
+  const prompt = preset?.prompt.trim() ?? '';
+  const previous = session.qaPresetAssignments?.[provider];
+  if (previous?.presetId !== (preset?.id ?? undefined) || (previous?.prompt.trim() ?? '') !== prompt) {
+    session.qaPresetAssignments ??= {};
+    if (preset && prompt) session.qaPresetAssignments[provider] = { presetId: preset.id, name: preset.name, prompt };
+    else delete session.qaPresetAssignments[provider];
+    // A previously completed reply with no preset must not suppress a newly selected one.
+    session.qaInitializedProviders = (session.qaInitializedProviders ?? []).filter((id) => id !== provider);
+  }
+  if (!preset || !prompt || session.qaInitializedProviders?.includes(provider)) return { payload };
+  return { payload: { ...payload, text: `${prompt}\n\n${payload.text}` }, key: JSON.stringify([preset.id, prompt]) };
 }
 
 function withExpertPreset(session: ConversationSession, provider: ProviderId, prompt: string): string {
@@ -92,6 +104,7 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
       const session = sessionById(state, sessionId);
       return {
         needsFresh: session.needsFreshConversations,
+        mode: session.mode,
         bindings: structuredClone(session.bindings)
       };
     });
@@ -103,7 +116,7 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
 
     const created = await Promise.all(targets.map(async (provider) => {
       const existing = snapshot.bindings[provider];
-      const binding = await bridge.createFreshConversation(provider, existing?.tabId);
+      const binding = await bridge.createFreshConversation(provider, existing?.tabId, snapshot.mode);
       return [provider, { provider, tabId: binding.tabId, conversationUrl: binding.conversationUrl }] as const;
     }));
 
@@ -120,7 +133,7 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
     return mutatePersistedState((state) => {
       const session = sessionById(state, sessionId);
       const operationId = id('op');
-      const providerPayload = withQaPreset(session, provider, payload);
+      const qaPreset = withQaPreset(state, session, provider, payload);
       const message: ChatMessage = {
         id: id('msg'),
         role: 'assistant',
@@ -134,7 +147,8 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
         messageId: message.id,
         provider,
         mode: session.mode,
-        payload: providerPayload,
+        payload: qaPreset.payload,
+        qaPresetKey: qaPreset.key,
         startedAt: Date.now(),
         phase: 'preparing'
       };
@@ -175,7 +189,7 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
       const session = sessionById(latest, sessionId);
       if (!session.pendingOperations?.[operation.operationId]) return;
       const binding = session.bindings[provider];
-      await bridge.send(provider, operation.operationId, operation.payload, binding?.tabId ?? tabId, binding?.conversationUrl ?? conversationUrl);
+      await bridge.send(provider, operation.operationId, operation.payload, binding?.tabId ?? tabId, binding?.conversationUrl ?? conversationUrl, operation.mode);
     } catch (error) {
       await failOperation(sessionId, operation.operationId, error);
     }
@@ -329,8 +343,11 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
           message.error = undefined;
         }
         delete session.pendingOperations?.[operation.operationId];
-        if (session.mode === 'qa' && !session.qaInitializedProviders?.includes(operation.provider)) {
-          session.qaInitializedProviders = [...(session.qaInitializedProviders ?? []), operation.provider];
+        if (session.mode === 'qa' && operation.qaPresetKey) {
+          const preset = session.qaPresetAssignments?.[operation.provider];
+          if (preset && operation.qaPresetKey === JSON.stringify([preset.presetId, preset.prompt.trim()]) && !session.qaInitializedProviders?.includes(operation.provider)) {
+            session.qaInitializedProviders = [...(session.qaInitializedProviders ?? []), operation.provider];
+          }
         }
         const execution = session.execution;
         if (execution?.currentOperationId === operation.operationId) {

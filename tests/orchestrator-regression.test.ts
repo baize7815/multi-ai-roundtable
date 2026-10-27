@@ -82,14 +82,14 @@ assert.ok(sends.every((item) => item.payload.text === 'QA 回归'), '未选择�
 
 const qaWithPresets = storage.createConversationSession('qa');
 await resetSessions([qaWithPresets]);
-await orchestrator.applyUiPatch({ sessions: [{
-  id: qaWithPresets.id,
-  addedMessages: [userMessage('预设首问')],
-  qaPresetAssignments: {
-    doubao: { presetId: 'preset-a', name: '产品经理', prompt: 'QA_PRESET_A：从产品视角回答。' },
-    deepseek: { presetId: 'preset-b', name: '工程师', prompt: 'QA_PRESET_B：从技术视角回答。' }
-  }
-}] });
+await orchestrator.applyUiPatch({
+  settings: { qaPresetByProvider: { doubao: 'preset-a', deepseek: 'preset-b' } },
+  expertPresets: [
+    { id: 'preset-a', name: '产品经理', prompt: 'QA_PRESET_A：从产品视角回答。', createdAt: 1, updatedAt: 1 },
+    { id: 'preset-b', name: '工程师', prompt: 'QA_PRESET_B：从技术视角回答。', createdAt: 1, updatedAt: 1 }
+  ],
+  sessions: [{ id: qaWithPresets.id, addedMessages: [userMessage('预设首问')] }]
+});
 await orchestrator.startQa({ sessionId: qaWithPresets.id, providers: ['doubao', 'deepseek'], payload: { text: '预设首问', attachments: [] } });
 await waitUntil(async () => {
   const session = (await storage.loadState()).conversations.find((item) => item.id === qaWithPresets.id)!;
@@ -102,15 +102,12 @@ assert.doesNotMatch(sends.find((item) => item.provider === 'deepseek')!.payload.
 const firstState = await storage.loadState();
 const firstSession = firstState.conversations.find((item) => item.id === qaWithPresets.id)!;
 assert.deepEqual(firstSession.messages.filter((item) => item.role === 'user').map((item) => item.text), ['预设首问'], '会话中不应显示注入的预设内容');
-firstState.expertPresets = [{ id: 'preset-a', name: '已修改', prompt: 'SHOULD_NOT_APPEAR', createdAt: 0, updatedAt: 1 }];
-firstState.settings.qaPresetByProvider = { doubao: 'preset-a' };
-await storage.saveState(firstState);
 await orchestrator.startQa({ sessionId: qaWithPresets.id, providers: ['doubao', 'deepseek'], payload: { text: '预设追问', attachments: [] } });
 await waitUntil(async () => {
   const session = (await storage.loadState()).conversations.find((item) => item.id === qaWithPresets.id)!;
   return session.messages.filter((item) => item.role === 'assistant' && item.status === 'completed').length === 4;
 });
-assert.deepEqual(sends.slice(-2).map((item) => item.payload.text), ['预设追问', '预设追问'], '后续回复不应重复注入预设，修改设置也不应改变既有会话');
+assert.deepEqual(sends.slice(-2).map((item) => item.payload.text), ['预设追问', '预设追问'], '同一预设后续回复不应重复注入');
 
 const unselected = storage.createConversationSession('qa');
 unselected.messages.push(userMessage('无预设'));
@@ -123,6 +120,46 @@ await waitUntil(async () => {
 });
 assert.equal(sends[0].payload.text, '无预设', '未选择预设的模型须正常发送原文');
 
+
+// Reproduce v0.2.2: selecting a preset after an existing QA response must affect the next actual provider request.
+const previousChat = storage.createConversationSession('qa');
+previousChat.messages.push(userMessage('之前已经聊过'));
+previousChat.messages.push({ id: 'previous-answer', role: 'assistant', provider: 'deepseek', text: '旧回复', createdAt: Date.now(), status: 'completed' });
+previousChat.qaInitializedProviders = ['deepseek']; // v0.2.2 incorrectly sets this even without a preset
+await resetSessions([previousChat]);
+await orchestrator.applyUiPatch({
+  settings: { qaPresetByProvider: { deepseek: 'role-c' } },
+  expertPresets: [{ id: 'role-c', name: '郑倩', prompt: 'REAL_DEEPSEEK_PRESET：请按角色回答。', createdAt: 1, updatedAt: 1 }]
+});
+await orchestrator.startQa({ sessionId: previousChat.id, providers: ['deepseek'], payload: { text: '我来啦', attachments: [] } });
+assert.match(sends[0]?.payload.text ?? '', /^REAL_DEEPSEEK_PRESET：.*\n\n我来啦$/s, '在既有会话中选择预设后，网页实际发送内容必须带上预设');
+await waitUntil(async () => (await storage.loadState()).conversations.find((item) => item.id === previousChat.id)!.messages.filter((item) => item.role === 'assistant' && item.status === 'completed').length === 2);
+await orchestrator.startQa({ sessionId: previousChat.id, providers: ['deepseek'], payload: { text: '继续聊天', attachments: [] } });
+assert.equal(sends.at(-1)?.payload.text, '继续聊天', '同一预设不应在第二轮重复注入');
+await waitUntil(async () => (await storage.loadState()).conversations.find((item) => item.id === previousChat.id)!.messages.filter((item) => item.role === 'assistant' && item.status === 'completed').length === 3);
+await orchestrator.applyUiPatch({
+  settings: { qaPresetByProvider: { deepseek: 'role-new' } },
+  expertPresets: [
+    { id: 'role-c', name: '郑倩', prompt: 'REAL_DEEPSEEK_PRESET：请按角色回答。', createdAt: 1, updatedAt: 1 },
+    { id: 'role-new', name: '新角色', prompt: 'NEW_ROLE_INJECT：切换后生效。', createdAt: 1, updatedAt: 2 }
+  ]
+});
+await orchestrator.startQa({ sessionId: previousChat.id, providers: ['deepseek'], payload: { text: '切换测试', attachments: [] } });
+assert.match(sends.at(-1)?.payload.text ?? '', /^NEW_ROLE_INJECT：.*\n\n切换测试$/s, '在已有会话切换预设后应重新注入');
+await waitUntil(async () => (await storage.loadState()).conversations.find((item) => item.id === previousChat.id)!.messages.filter((item) => item.role === 'assistant' && item.status === 'completed').length === 4);
+await orchestrator.applyUiPatch({
+  expertPresets: [
+    { id: 'role-c', name: '郑倩', prompt: 'REAL_DEEPSEEK_PRESET：请按角色回答。', createdAt: 1, updatedAt: 1 },
+    { id: 'role-new', name: '新角色', prompt: 'EDITED_ROLE_PRESET：更新内容。', createdAt: 1, updatedAt: 3 }
+  ]
+});
+await orchestrator.startQa({ sessionId: previousChat.id, providers: ['deepseek'], payload: { text: '更新预设测试', attachments: [] } });
+assert.match(sends.at(-1)?.payload.text ?? '', /^EDITED_ROLE_PRESET：.*\n\n更新预设测试$/s, '修改同一预设的提示词后也应重新注入');
+await waitUntil(async () => (await storage.loadState()).conversations.find((item) => item.id === previousChat.id)!.messages.filter((item) => item.role === 'assistant' && item.status === 'completed').length === 5);
+await orchestrator.applyUiPatch({ settings: { qaPresetByProvider: {} } });
+await orchestrator.startQa({ sessionId: previousChat.id, providers: ['deepseek'], payload: { text: '取消预设', attachments: [] } });
+assert.equal(sends.at(-1)?.payload.text, '取消预设', '取消预设后不应再在消息前注入提示词');
+await waitUntil(async () => (await storage.loadState()).conversations.find((item) => item.id === previousChat.id)!.messages.filter((item) => item.role === 'assistant' && item.status === 'completed').length === 6);
 
 const roundtable = storage.createConversationSession('roundtable');
 roundtable.messages.push(userMessage('圆桌回归'));

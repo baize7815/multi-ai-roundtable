@@ -266,13 +266,22 @@ ${message.text}`).join("\n\n") : "\u8BF7\u7EE7\u7EED\u8BA8\u8BBA\uFF0C\u8865\u51
 
 \u8BF7\u57FA\u4E8E\u4EE5\u4E0A\u4F60\u5C1A\u672A\u770B\u5230\u7684\u65B0\u589E\u5185\u5BB9\u7EE7\u7EED\u8BA8\u8BBA\u3002\u907F\u514D\u590D\u8FF0\u5DF2\u6709\u5185\u5BB9\uFF0C\u76F4\u63A5\u56DE\u5E94\u5E76\u63A8\u8FDB\u8BA8\u8BBA\u3002`;
 }
-function withQaPreset(session, provider, payload) {
-  if (session.mode !== "qa" || session.qaInitializedProviders?.includes(provider)) return payload;
-  const preset = session.qaPresetAssignments?.[provider];
-  if (!preset?.prompt.trim()) return payload;
-  return { ...payload, text: `${preset.prompt.trim()}
+function withQaPreset(state, session, provider, payload) {
+  if (session.mode !== "qa") return { payload };
+  const presetId = state.settings.qaPresetByProvider[provider];
+  const preset = presetId ? state.expertPresets.find((item) => item.id === presetId) : void 0;
+  const prompt = preset?.prompt.trim() ?? "";
+  const previous = session.qaPresetAssignments?.[provider];
+  if (previous?.presetId !== (preset?.id ?? void 0) || (previous?.prompt.trim() ?? "") !== prompt) {
+    session.qaPresetAssignments ??= {};
+    if (preset && prompt) session.qaPresetAssignments[provider] = { presetId: preset.id, name: preset.name, prompt };
+    else delete session.qaPresetAssignments[provider];
+    session.qaInitializedProviders = (session.qaInitializedProviders ?? []).filter((id3) => id3 !== provider);
+  }
+  if (!preset || !prompt || session.qaInitializedProviders?.includes(provider)) return { payload };
+  return { payload: { ...payload, text: `${prompt}
 
-${payload.text}` };
+${payload.text}` }, key: JSON.stringify([preset.id, prompt]) };
 }
 function withExpertPreset(session, provider, prompt) {
   if (session.mode !== "expert") return prompt;
@@ -293,6 +302,7 @@ function createBackgroundOrchestrator(bridge) {
       const session = sessionById(state, sessionId);
       return {
         needsFresh: session.needsFreshConversations,
+        mode: session.mode,
         bindings: structuredClone(session.bindings)
       };
     });
@@ -300,7 +310,7 @@ function createBackgroundOrchestrator(bridge) {
     if (!targets.length) return;
     const created = await Promise.all(targets.map(async (provider) => {
       const existing = snapshot.bindings[provider];
-      const binding = await bridge.createFreshConversation(provider, existing?.tabId);
+      const binding = await bridge.createFreshConversation(provider, existing?.tabId, snapshot.mode);
       return [provider, { provider, tabId: binding.tabId, conversationUrl: binding.conversationUrl }];
     }));
     await mutatePersistedState((state) => {
@@ -315,7 +325,7 @@ function createBackgroundOrchestrator(bridge) {
     return mutatePersistedState((state) => {
       const session = sessionById(state, sessionId);
       const operationId = id("op");
-      const providerPayload = withQaPreset(session, provider, payload);
+      const qaPreset = withQaPreset(state, session, provider, payload);
       const message = {
         id: id("msg"),
         role: "assistant",
@@ -329,7 +339,8 @@ function createBackgroundOrchestrator(bridge) {
         messageId: message.id,
         provider,
         mode: session.mode,
-        payload: providerPayload,
+        payload: qaPreset.payload,
+        qaPresetKey: qaPreset.key,
         startedAt: Date.now(),
         phase: "preparing"
       };
@@ -368,7 +379,7 @@ function createBackgroundOrchestrator(bridge) {
       const session = sessionById(latest, sessionId);
       if (!session.pendingOperations?.[operation.operationId]) return;
       const binding = session.bindings[provider];
-      await bridge.send(provider, operation.operationId, operation.payload, binding?.tabId ?? tabId, binding?.conversationUrl ?? conversationUrl);
+      await bridge.send(provider, operation.operationId, operation.payload, binding?.tabId ?? tabId, binding?.conversationUrl ?? conversationUrl, operation.mode);
     } catch (error) {
       await failOperation(sessionId, operation.operationId, error);
     }
@@ -516,8 +527,11 @@ function createBackgroundOrchestrator(bridge) {
           message.error = void 0;
         }
         delete session.pendingOperations?.[operation.operationId];
-        if (session.mode === "qa" && !session.qaInitializedProviders?.includes(operation.provider)) {
-          session.qaInitializedProviders = [...session.qaInitializedProviders ?? [], operation.provider];
+        if (session.mode === "qa" && operation.qaPresetKey) {
+          const preset = session.qaPresetAssignments?.[operation.provider];
+          if (preset && operation.qaPresetKey === JSON.stringify([preset.presetId, preset.prompt.trim()]) && !session.qaInitializedProviders?.includes(operation.provider)) {
+            session.qaInitializedProviders = [...session.qaInitializedProviders ?? [], operation.provider];
+          }
         }
         const execution = session.execution;
         if (execution?.currentOperationId === operation.operationId) {
@@ -707,7 +721,7 @@ function createReplyForeground(isManaged) {
       if (lease.manual) return;
       const active = (await chrome.tabs.query({ active: true, windowId }))[0];
       if (lease.manual || active?.id !== lease.lastTabId) return;
-      if (lease.originalTabId && !privateTabs.has(lease.originalTabId) && lease.originalTabId !== active.id) {
+      if (!lease.keepSelected && lease.originalTabId && !privateTabs.has(lease.originalTabId) && lease.originalTabId !== active.id) {
         await activate(lease.originalTabId, windowId).catch(() => void 0);
       }
       const restored = (await chrome.tabs.query({ active: true, windowId }))[0];
@@ -735,7 +749,15 @@ function createReplyForeground(isManaged) {
         const tab = await chrome.tabs.get(tabId).catch(() => void 0);
         if (!tab || tab.windowId === void 0) continue;
         const group = targets.get(tab.windowId) ?? [];
-        if (!group.some((item) => item.tabId === tabId)) group.push({ tabId });
+        const streaming = session.messages.find((message) => message.id === operation.messageId)?.status === "streaming";
+        const keepSelected = session.mode === "qa" && state.settings.qaProviders.length === 1;
+        const existing = group.find((item) => item.tabId === tabId);
+        if (existing) {
+          existing.streaming ||= streaming;
+          existing.keepSelected ||= keepSelected;
+        } else {
+          group.push({ tabId, streaming, keepSelected });
+        }
         targets.set(tab.windowId, group);
       }
     }
@@ -746,7 +768,7 @@ function createReplyForeground(isManaged) {
       let lease = leases.get(windowId);
       const active = (await chrome.tabs.query({ active: true, windowId }))[0];
       if (!lease) {
-        lease = { originalTabId: active?.id, selectedAt: 0, manual: false, collapsedGroups: /* @__PURE__ */ new Set() };
+        lease = { originalTabId: active?.id, selectedAt: 0, manual: false, keepSelected: false, collapsedGroups: /* @__PURE__ */ new Set() };
         leases.set(windowId, lease);
       }
       if (lease.manual) continue;
@@ -754,12 +776,15 @@ function createReplyForeground(isManaged) {
         lease.manual = true;
         continue;
       }
-      const preferred = group.find((item) => item.tabId === preferredTabId);
-      const currentIndex = group.findIndex((item) => item.tabId === lease.lastTabId);
-      const next = preferred ?? group[currentIndex < 0 ? 0 : (currentIndex + 1) % group.length];
+      const streaming = group.filter((item) => item.streaming);
+      const candidates = streaming.length ? streaming : group;
+      const preferred = candidates.find((item) => item.tabId === preferredTabId);
+      const currentIndex = candidates.findIndex((item) => item.tabId === lease.lastTabId);
+      const next = preferred ?? candidates[currentIndex < 0 ? 0 : (currentIndex + 1) % candidates.length];
       if (!preferred && currentIndex >= 0 && Date.now() - lease.selectedAt < 4e3) continue;
       if (active?.id === next.tabId) {
         lease.lastTabId = next.tabId;
+        lease.keepSelected ||= next.keepSelected;
         if (!lease.selectedAt) lease.selectedAt = Date.now();
         continue;
       }
@@ -772,6 +797,7 @@ function createReplyForeground(isManaged) {
       if (lease.manual) continue;
       await activate(next.tabId, windowId);
       lease.lastTabId = next.tabId;
+      lease.keepSelected ||= next.keepSelected;
       lease.selectedAt = Date.now();
     }
   }
@@ -3771,6 +3797,7 @@ var COMMAND_QUEUE_KEY = "multiAiRoundtableCommandQueueV1";
 var COMMAND_ALARM_PREFIX = "multi-ai-command:";
 var MANAGED_TABS_KEY = "multiAiRoundtableManagedTabsV1";
 var MANAGED_GROUPS_KEY = "multiAiRoundtableManagedGroupsV1";
+var QA_UNGROUPED_TABS_KEY = "multiAiRoundtableQaUngroupedTabsV1";
 var ISOLATION_MIGRATION_KEY = "multiAiRoundtableIsolationMigrationV1";
 var PROVIDER_WATCHDOG_ALARM = "multi-ai-provider-watchdog";
 var lastProviderActivity = /* @__PURE__ */ new Map();
@@ -3917,6 +3944,22 @@ async function findProviderTab(provider, preferredTabId) {
   const tabs = await chrome.tabs.query({ url: patterns });
   return tabs.find((tab) => tab.id) ?? null;
 }
+var qaTabTail = Promise.resolve();
+async function isQaUngroupedTab(tabId) {
+  const saved = await chrome.storage.session.get(QA_UNGROUPED_TABS_KEY);
+  return Boolean(saved[QA_UNGROUPED_TABS_KEY]?.[String(tabId)]);
+}
+async function markQaUngroupedTab(tabId, qa) {
+  const task = qaTabTail.then(async () => {
+    const saved = await chrome.storage.session.get(QA_UNGROUPED_TABS_KEY);
+    const tabs = saved[QA_UNGROUPED_TABS_KEY] ?? {};
+    if (qa) tabs[String(tabId)] = true;
+    else delete tabs[String(tabId)];
+    await chrome.storage.session.set({ [QA_UNGROUPED_TABS_KEY]: tabs });
+  });
+  qaTabTail = task.catch(() => void 0);
+  await task;
+}
 var managedTabsTail = Promise.resolve();
 async function managedTabs() {
   const result = await chrome.storage.session.get(MANAGED_TABS_KEY);
@@ -3941,6 +3984,7 @@ async function unmarkManagedTab(tabId) {
   await mutateManagedTabs((tabs) => {
     delete tabs[String(tabId)];
   });
+  await markQaUngroupedTab(tabId, false);
   await forgetPrivateGameTab(tabId);
 }
 async function isManagedTab(tabId, provider) {
@@ -3983,7 +4027,7 @@ async function addToAiDialogueGroup(tabId) {
   const task = aiDialogueGroupTail.then(async () => {
     try {
       if (!await isManagedTab(tabId)) return;
-      if (await isGameBoundTab(tabId)) return;
+      if (await isGameBoundTab(tabId) || await isQaUngroupedTab(tabId)) return;
       const tab = await chrome.tabs.update(tabId, { autoDiscardable: false });
       if (tab.windowId === void 0) return;
       const groups = await managedGroups();
@@ -4012,6 +4056,24 @@ async function addToAiDialogueGroup(tabId) {
   aiDialogueGroupTail = task.catch(() => void 0);
   return task;
 }
+async function placeConversationTab(tabId, mode) {
+  await markQaUngroupedTab(tabId, mode === "qa");
+  if (mode !== "qa") {
+    await addToAiDialogueGroup(tabId);
+    return;
+  }
+  const tab = await chrome.tabs.get(tabId).catch(() => void 0);
+  if (!tab) return;
+  if (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) await chrome.tabs.ungroup(tabId).catch(() => void 0);
+  await chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => void 0);
+}
+async function restoreQaTabPlacement() {
+  const state = await loadState();
+  const ids = new Set(state.conversations.filter((session) => session.mode === "qa").flatMap((session) => Object.values(session.bindings).map((binding) => binding.tabId)));
+  for (const tabId of ids) {
+    if (await isManagedTab(tabId)) await placeConversationTab(tabId, "qa");
+  }
+}
 async function migrateLegacyGrouping() {
   const migration = await chrome.storage.local.get(ISOLATION_MIGRATION_KEY);
   if (migration[ISOLATION_MIGRATION_KEY]) return;
@@ -4024,7 +4086,7 @@ async function migrateLegacyGrouping() {
   await chrome.storage.session.remove([MANAGED_TABS_KEY, MANAGED_GROUPS_KEY]);
   await chrome.storage.local.set({ [ISOLATION_MIGRATION_KEY]: true });
 }
-async function createManagedProviderTab(provider, url, allowForegroundWake = true) {
+async function createManagedProviderTab(provider, url, allowForegroundWake = true, mode = "roundtable") {
   if (!allowForegroundWake) {
     const created2 = await createPrivateGameTab(provider, url);
     if (created2.id === void 0) throw new Error("\u6E38\u620F\u6807\u7B7E\u9875\u65E0\u6548");
@@ -4034,15 +4096,15 @@ async function createManagedProviderTab(provider, url, allowForegroundWake = tru
   const created = await chrome.tabs.create({ url: "about:blank", active: false });
   if (!created.id) throw new Error("Provider \u6807\u7B7E\u9875\u65E0\u6548");
   await markManagedTab(created.id, provider);
-  await addToAiDialogueGroup(created.id);
+  await placeConversationTab(created.id, mode);
   return chrome.tabs.update(created.id, { url, active: false });
 }
-async function ensureProviderTab(provider, allowForegroundWake = true) {
+async function ensureProviderTab(provider, allowForegroundWake = true, mode = "roundtable") {
   const homeUrl = providerById[provider].homeUrl;
   if (!homeUrl) throw new Error(`${provider} \u5C1A\u672A\u63A5\u5165`);
-  return createManagedProviderTab(provider, homeUrl, allowForegroundWake);
+  return createManagedProviderTab(provider, homeUrl, allowForegroundWake, mode);
 }
-async function resolveProviderTab(provider, preferredTabId, preferredUrl, allowForegroundWake = true) {
+async function resolveProviderTab(provider, preferredTabId, preferredUrl, allowForegroundWake = true, mode = "roundtable") {
   if (preferredTabId && await isManagedTab(preferredTabId, provider)) {
     let tab;
     try {
@@ -4050,21 +4112,21 @@ async function resolveProviderTab(provider, preferredTabId, preferredUrl, allowF
     } catch {
     }
     if (tab?.id && tab.url && providerById[provider].urlPatterns?.some((pattern) => matchPattern(tab.url, pattern))) {
-      if (allowForegroundWake) await addToAiDialogueGroup(tab.id);
+      if (allowForegroundWake) await placeConversationTab(tab.id, mode);
       else await preparePrivateGamePage(tab.id, provider);
       return tab;
     }
   }
   if (preferredUrl && providerById[provider].urlPatterns?.some((pattern) => matchPattern(preferredUrl, pattern))) {
-    const reopened = await createManagedProviderTab(provider, preferredUrl, allowForegroundWake);
+    const reopened = await createManagedProviderTab(provider, preferredUrl, allowForegroundWake, mode);
     if (reopened.id) {
       await waitForProviderReady(reopened.id, provider, 3e4, true, allowForegroundWake);
     }
     return reopened;
   }
-  return ensureProviderTab(provider, allowForegroundWake);
+  return ensureProviderTab(provider, allowForegroundWake, mode);
 }
-async function createFreshConversation(provider, preferredTabId, allowForegroundWake = true) {
+async function createFreshConversation(provider, preferredTabId, allowForegroundWake = true, mode = "roundtable") {
   let tab = null;
   let alreadyNavigated = false;
   const url = providerById[provider].homeUrl;
@@ -4078,7 +4140,7 @@ async function createFreshConversation(provider, preferredTabId, allowForeground
     }
   }
   if (!tab) {
-    tab = await createManagedProviderTab(provider, url, allowForegroundWake);
+    tab = await createManagedProviderTab(provider, url, allowForegroundWake, mode);
     alreadyNavigated = true;
   }
   if (!tab.id) throw new Error("Provider \u6807\u7B7E\u9875\u65E0\u6548");
@@ -4087,7 +4149,7 @@ async function createFreshConversation(provider, preferredTabId, allowForeground
       if (!allowForegroundWake) await preparePrivateGamePage(tab.id, provider);
       await chrome.tabs.update(tab.id, { url, active: false });
     }
-    if (allowForegroundWake) await addToAiDialogueGroup(tab.id);
+    if (allowForegroundWake) await placeConversationTab(tab.id, mode);
     await waitForProviderReady(tab.id, provider, 3e4, true, allowForegroundWake);
     const refreshed = await chrome.tabs.get(tab.id);
     return { tabId: tab.id, conversationUrl: refreshed.url };
@@ -4428,10 +4490,10 @@ async function waitForProviderReady(tabId, provider, timeoutMs = 3e4, initialise
   const detail = lastError instanceof Error ? `\uFF1A${lastError.message}` : "";
   throw new Error(`${provider} \u9875\u9762\u521D\u59CB\u5316\u8D85\u65F6${detail}`);
 }
-async function sendProviderOperation(provider, operationId, payload, preferredTabId, preferredUrl, onBinding, allowForegroundWake = true) {
+async function sendProviderOperation(provider, operationId, payload, preferredTabId, preferredUrl, onBinding, allowForegroundWake = true, mode = "roundtable") {
   sendingOperations.add(operationId);
   try {
-    const tab = await resolveProviderTab(provider, preferredTabId, preferredUrl, allowForegroundWake);
+    const tab = await resolveProviderTab(provider, preferredTabId, preferredUrl, allowForegroundWake, mode);
     if (!tab.id) throw new Error("Provider \u6807\u7B7E\u9875\u65E0\u6548");
     await onBinding?.(tab.id, tab.url);
     await waitForProviderReady(tab.id, provider, 3e4, false, allowForegroundWake);
@@ -4458,10 +4520,10 @@ async function sendProviderOperation(provider, operationId, payload, preferredTa
     sendingOperations.delete(operationId);
   }
 }
-async function sendToProvider(provider, operationId, payload, preferredTabId, preferredUrl) {
+async function sendToProvider(provider, operationId, payload, preferredTabId, preferredUrl, mode = "roundtable") {
   await sendProviderOperation(provider, operationId, payload, preferredTabId, preferredUrl, async (tabId, conversationUrl) => {
     await orchestrator.attachBinding(operationId, provider, tabId, conversationUrl);
-  });
+  }, true, mode);
 }
 async function cancelProvider(provider, operationId, preferredTabId) {
   if (!preferredTabId || !await isManagedTab(preferredTabId, provider)) return;
@@ -4476,7 +4538,7 @@ async function cancelProvider(provider, operationId, preferredTabId) {
   if (response?.success === false) throw new Error(response.error || `${provider} \u4E2D\u65AD\u5931\u8D25`);
 }
 var orchestrator = createBackgroundOrchestrator({
-  createFreshConversation,
+  createFreshConversation: (provider, preferredTabId, mode) => createFreshConversation(provider, preferredTabId, true, mode),
   send: sendToProvider,
   cancel: cancelProvider
 });
@@ -4515,7 +4577,12 @@ var clocktowerEngine = createClocktowerEngine({
 });
 async function routeProviderEvent(event) {
   const handled = await werewolfEngine.handleProviderEvent(event) || await clocktowerEngine.handleProviderEvent(event);
-  if (!handled) await orchestrator.handleProviderEvent(event);
+  if (!handled) {
+    await orchestrator.handleProviderEvent(event);
+    if (event.type === "PROVIDER_RESPONSE_STARTED" && event.tabId) {
+      await foregroundReplies.sync(await loadState(), event.tabId).catch(() => void 0);
+    }
+  }
 }
 async function replayPendingTerminalEvents(state) {
   state ??= await loadState();
@@ -4666,6 +4733,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 void (async () => {
   await migrateLegacyGrouping();
+  await restoreQaTabPlacement();
   replyAccelerationEnabled = (await loadState()).settings.replyAcceleration !== false;
   await replayPendingTerminalEvents();
   await orchestrator.recover();
@@ -4768,7 +4836,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { success: true, tabId: tab.id };
       }
       case "CREATE_FRESH_CONVERSATION": {
-        const binding = await createFreshConversation(message.provider, message.tabId);
+        const mode = message.mode === "qa" ? "qa" : message.mode === "expert" ? "expert" : "roundtable";
+        const binding = await createFreshConversation(message.provider, message.tabId, true, mode);
         return { success: true, ...binding };
       }
       case "START_QA_SESSION": {

@@ -6,16 +6,17 @@ Use your signed-in AI websites for parallel answers, sequential discussions, exp
 
 **Author:** [@baize7815](https://github.com/baize7815) · Chrome MV3 · TypeScript · Free, non-commercial community project · [中文](README.md)
 
-> **Release v0.2.2**: Adds optional per-provider AI Chat presets on the `local/classic-mode-restoration` release branch. GitHub `main` remains separate.
+> **Release v0.2.3**: Fixes AI Chat preset injection for existing sessions, keeps AI Chat tabs ungrouped with reply-following navigation, and adds manual Qiniu S3 expert preset backup (cloud integration tested only with simulated requests). The release branch remains separate from `main`.
 
 ## Highlights
 
 - Ten web AI integrations: Doubao, DeepSeek, Kimi, Qwen, Zhipu, ChatGPT, Gemini, Grok, Wenxin and MiniMax.
-- AI Chat: compare concurrent responses from multiple providers; optionally assign a reusable per-provider prompt preset, applied once at the beginning of a new conversation.
+- AI Chat: compare concurrent responses from multiple providers; optionally assign a reusable per-provider prompt preset, applied on the next send, including in existing conversations. Re-applying a different preset sends the new instructions once.
 - AI Roundtable: strict sequential relay and multiple discussion rounds.
 - Expert Team: private per-provider role presets for cooperative analysis.
 - AI Werewolf: hidden-role gameplay with deterministic state-machine adjudication.
 - AI Fog Council: this release branch retains the locally restored classic game engine; full end-to-end game simulation remains unverified.
+- Manual Qiniu S3 backup/restore for shared Expert Team and AI Chat prompts (credentials configured by the user, real cloud writes not verified).
 - Session recovery, interruption/resumption, separate per-provider conversations and final-only game response commits.
 
 ## Modes

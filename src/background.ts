@@ -1,6 +1,6 @@
 import { providerById } from './shared/providers';
 import { loadState, STORAGE_KEY } from './shared/storage';
-import type { ComposerPayload, PersistedState, ProviderEvent, ProviderId } from './shared/types';
+import type { ComposerPayload, ConversationMode, PersistedState, ProviderEvent, ProviderId } from './shared/types';
 import { createBackgroundOrchestrator } from './background/orchestrator';
 import { updatePageFramePump } from './background/page-liveness';
 import { createReplyForeground } from './background/reply-foreground';
@@ -29,6 +29,7 @@ const COMMAND_QUEUE_KEY = 'multiAiRoundtableCommandQueueV1';
 const COMMAND_ALARM_PREFIX = 'multi-ai-command:';
 const MANAGED_TABS_KEY = 'multiAiRoundtableManagedTabsV1';
 const MANAGED_GROUPS_KEY = 'multiAiRoundtableManagedGroupsV1';
+const QA_UNGROUPED_TABS_KEY = 'multiAiRoundtableQaUngroupedTabsV1';
 const ISOLATION_MIGRATION_KEY = 'multiAiRoundtableIsolationMigrationV1';
 const PROVIDER_WATCHDOG_ALARM = 'multi-ai-provider-watchdog';
 const lastProviderActivity = new Map<string, number>();
@@ -196,6 +197,25 @@ async function findProviderTab(provider: ProviderId, preferredTabId?: number): P
 
 type ManagedTabs = Record<string, ProviderId>;
 type ManagedGroups = Record<string, number>;
+type QaTabs = Record<string, true>;
+let qaTabTail: Promise<unknown> = Promise.resolve();
+
+async function isQaUngroupedTab(tabId: number): Promise<boolean> {
+  const saved = await chrome.storage.session.get(QA_UNGROUPED_TABS_KEY);
+  return Boolean((saved[QA_UNGROUPED_TABS_KEY] as QaTabs | undefined)?.[String(tabId)]);
+}
+
+async function markQaUngroupedTab(tabId: number, qa: boolean): Promise<void> {
+  const task = qaTabTail.then(async () => {
+    const saved = await chrome.storage.session.get(QA_UNGROUPED_TABS_KEY);
+    const tabs: QaTabs = (saved[QA_UNGROUPED_TABS_KEY] as QaTabs | undefined) ?? {};
+    if (qa) tabs[String(tabId)] = true;
+    else delete tabs[String(tabId)];
+    await chrome.storage.session.set({ [QA_UNGROUPED_TABS_KEY]: tabs });
+  });
+  qaTabTail = task.catch(() => undefined);
+  await task;
+}
 
 let managedTabsTail: Promise<unknown> = Promise.resolve();
 
@@ -225,6 +245,7 @@ async function unmarkManagedTab(tabId: number): Promise<void> {
   await mutateManagedTabs((tabs) => {
     delete tabs[String(tabId)];
   });
+  await markQaUngroupedTab(tabId, false);
   await forgetPrivateGameTab(tabId);
 }
 
@@ -278,7 +299,7 @@ async function addToAiDialogueGroup(tabId: number): Promise<void> {
   const task = aiDialogueGroupTail.then(async () => {
     try {
       if (!(await isManagedTab(tabId))) return;
-      if (await isGameBoundTab(tabId)) return;
+      if (await isGameBoundTab(tabId) || await isQaUngroupedTab(tabId)) return;
       const tab = await chrome.tabs.update(tabId, { autoDiscardable: false });
       if (tab.windowId === undefined) return;
       const groups = await managedGroups();
@@ -313,6 +334,27 @@ async function addToAiDialogueGroup(tabId: number): Promise<void> {
   return task;
 }
 
+async function placeConversationTab(tabId: number, mode: ConversationMode): Promise<void> {
+  await markQaUngroupedTab(tabId, mode === 'qa');
+  if (mode !== 'qa') {
+    await addToAiDialogueGroup(tabId);
+    return;
+  }
+  // Ungroup previously managed AI Chat tabs created by older releases.
+  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+  if (!tab) return;
+  if (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) await chrome.tabs.ungroup(tabId).catch(() => undefined);
+  await chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => undefined);
+}
+
+async function restoreQaTabPlacement(): Promise<void> {
+  const state = await loadState();
+  const ids = new Set(state.conversations.filter((session) => session.mode === 'qa').flatMap((session) => Object.values(session.bindings).map((binding) => binding.tabId)));
+  for (const tabId of ids) {
+    if (await isManagedTab(tabId)) await placeConversationTab(tabId, 'qa');
+  }
+}
+
 async function migrateLegacyGrouping(): Promise<void> {
   const migration = await chrome.storage.local.get(ISOLATION_MIGRATION_KEY);
   if (migration[ISOLATION_MIGRATION_KEY]) return;
@@ -326,7 +368,7 @@ async function migrateLegacyGrouping(): Promise<void> {
   await chrome.storage.local.set({ [ISOLATION_MIGRATION_KEY]: true });
 }
 
-async function createManagedProviderTab(provider: ProviderId, url: string, allowForegroundWake = true): Promise<chrome.tabs.Tab> {
+async function createManagedProviderTab(provider: ProviderId, url: string, allowForegroundWake = true, mode: ConversationMode = 'roundtable'): Promise<chrome.tabs.Tab> {
   if (!allowForegroundWake) {
     const created = await createPrivateGameTab(provider, url);
     if (created.id === undefined) throw new Error('游戏标签页无效');
@@ -338,17 +380,17 @@ async function createManagedProviderTab(provider: ProviderId, url: string, allow
   const created = await chrome.tabs.create({ url: 'about:blank', active: false });
   if (!created.id) throw new Error('Provider 标签页无效');
   await markManagedTab(created.id, provider);
-  await addToAiDialogueGroup(created.id);
+  await placeConversationTab(created.id, mode);
   return chrome.tabs.update(created.id, { url, active: false });
 }
 
-async function ensureProviderTab(provider: ProviderId, allowForegroundWake = true): Promise<chrome.tabs.Tab> {
+async function ensureProviderTab(provider: ProviderId, allowForegroundWake = true, mode: ConversationMode = 'roundtable'): Promise<chrome.tabs.Tab> {
   const homeUrl = providerById[provider].homeUrl;
   if (!homeUrl) throw new Error(`${provider} 尚未接入`);
-  return createManagedProviderTab(provider, homeUrl, allowForegroundWake);
+  return createManagedProviderTab(provider, homeUrl, allowForegroundWake, mode);
 }
 
-async function resolveProviderTab(provider: ProviderId, preferredTabId?: number, preferredUrl?: string, allowForegroundWake = true): Promise<chrome.tabs.Tab> {
+async function resolveProviderTab(provider: ProviderId, preferredTabId?: number, preferredUrl?: string, allowForegroundWake = true, mode: ConversationMode = 'roundtable'): Promise<chrome.tabs.Tab> {
   if (preferredTabId && await isManagedTab(preferredTabId, provider)) {
     let tab: chrome.tabs.Tab | undefined;
     try {
@@ -357,22 +399,22 @@ async function resolveProviderTab(provider: ProviderId, preferredTabId?: number,
       // The bound tab was closed; try reopening the bound conversation URL below.
     }
     if (tab?.id && tab.url && providerById[provider].urlPatterns?.some((pattern) => matchPattern(tab.url!, pattern))) {
-      if (allowForegroundWake) await addToAiDialogueGroup(tab.id);
+      if (allowForegroundWake) await placeConversationTab(tab.id, mode);
       else await preparePrivateGamePage(tab.id, provider);
       return tab;
     }
   }
   if (preferredUrl && providerById[provider].urlPatterns?.some((pattern) => matchPattern(preferredUrl, pattern))) {
-    const reopened = await createManagedProviderTab(provider, preferredUrl, allowForegroundWake);
+    const reopened = await createManagedProviderTab(provider, preferredUrl, allowForegroundWake, mode);
     if (reopened.id) {
       await waitForProviderReady(reopened.id, provider, 30000, true, allowForegroundWake);
     }
     return reopened;
   }
-  return ensureProviderTab(provider, allowForegroundWake);
+  return ensureProviderTab(provider, allowForegroundWake, mode);
 }
 
-async function createFreshConversation(provider: ProviderId, preferredTabId?: number, allowForegroundWake = true) {
+async function createFreshConversation(provider: ProviderId, preferredTabId?: number, allowForegroundWake = true, mode: ConversationMode = 'roundtable') {
   let tab: chrome.tabs.Tab | null = null;
   let alreadyNavigated = false;
   const url = providerById[provider].homeUrl;
@@ -386,7 +428,7 @@ async function createFreshConversation(provider: ProviderId, preferredTabId?: nu
     }
   }
   if (!tab) {
-    tab = await createManagedProviderTab(provider, url, allowForegroundWake);
+    tab = await createManagedProviderTab(provider, url, allowForegroundWake, mode);
     alreadyNavigated = true;
   }
   if (!tab.id) throw new Error('Provider 标签页无效');
@@ -395,7 +437,7 @@ async function createFreshConversation(provider: ProviderId, preferredTabId?: nu
       if (!allowForegroundWake) await preparePrivateGamePage(tab.id, provider);
       await chrome.tabs.update(tab.id, { url, active: false });
     }
-    if (allowForegroundWake) await addToAiDialogueGroup(tab.id);
+    if (allowForegroundWake) await placeConversationTab(tab.id, mode);
     await waitForProviderReady(tab.id, provider, 30000, true, allowForegroundWake);
     const refreshed = await chrome.tabs.get(tab.id);
     return { tabId: tab.id, conversationUrl: refreshed.url };
@@ -755,11 +797,12 @@ async function sendProviderOperation(
   preferredTabId?: number,
   preferredUrl?: string,
   onBinding?: (tabId: number, conversationUrl?: string) => Promise<void>,
-  allowForegroundWake = true
+  allowForegroundWake = true,
+  mode: ConversationMode = 'roundtable'
 ): Promise<{ tabId: number; conversationUrl?: string }> {
   sendingOperations.add(operationId);
   try {
-    const tab = await resolveProviderTab(provider, preferredTabId, preferredUrl, allowForegroundWake);
+    const tab = await resolveProviderTab(provider, preferredTabId, preferredUrl, allowForegroundWake, mode);
     if (!tab.id) throw new Error('Provider 标签页无效');
     await onBinding?.(tab.id, tab.url);
     await waitForProviderReady(tab.id, provider, 30000, false, allowForegroundWake);
@@ -785,10 +828,10 @@ async function sendProviderOperation(
   } finally { sendingOperations.delete(operationId); }
 }
 
-async function sendToProvider(provider: ProviderId, operationId: string, payload: ComposerPayload, preferredTabId?: number, preferredUrl?: string): Promise<void> {
+async function sendToProvider(provider: ProviderId, operationId: string, payload: ComposerPayload, preferredTabId?: number, preferredUrl?: string, mode: ConversationMode = 'roundtable'): Promise<void> {
   await sendProviderOperation(provider, operationId, payload, preferredTabId, preferredUrl, async (tabId, conversationUrl) => {
     await orchestrator.attachBinding(operationId, provider, tabId, conversationUrl);
-  });
+  }, true, mode);
 }
 
 async function cancelProvider(provider: ProviderId, operationId?: string, preferredTabId?: number): Promise<void> {
@@ -801,7 +844,7 @@ async function cancelProvider(provider: ProviderId, operationId?: string, prefer
 }
 
 const orchestrator = createBackgroundOrchestrator({
-  createFreshConversation,
+  createFreshConversation: (provider, preferredTabId, mode) => createFreshConversation(provider, preferredTabId, true, mode),
   send: sendToProvider,
   cancel: cancelProvider
 });
@@ -837,7 +880,12 @@ const clocktowerEngine = createClocktowerEngine({
 
 async function routeProviderEvent(event: ProviderEvent): Promise<void> {
   const handled = await werewolfEngine.handleProviderEvent(event) || await clocktowerEngine.handleProviderEvent(event);
-  if (!handled) await orchestrator.handleProviderEvent(event);
+  if (!handled) {
+    await orchestrator.handleProviderEvent(event);
+    if (event.type === 'PROVIDER_RESPONSE_STARTED' && event.tabId) {
+      await foregroundReplies.sync(await loadState(), event.tabId).catch(() => undefined);
+    }
+  }
 }
 
 // Recover a final reply even if its content script's message channel closed or
@@ -994,6 +1042,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 void (async () => {
   await migrateLegacyGrouping();
+  await restoreQaTabPlacement();
   replyAccelerationEnabled = (await loadState()).settings.replyAcceleration !== false;
   await replayPendingTerminalEvents();
   await orchestrator.recover();
@@ -1099,7 +1148,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { success: true, tabId: tab.id };
       }
       case 'CREATE_FRESH_CONVERSATION': {
-        const binding = await createFreshConversation(message.provider as ProviderId, message.tabId as number | undefined);
+        const mode: ConversationMode = message.mode === 'qa' ? 'qa' : message.mode === 'expert' ? 'expert' : 'roundtable';
+        const binding = await createFreshConversation(message.provider as ProviderId, message.tabId as number | undefined, true, mode);
         return { success: true, ...binding };
       }
       case 'START_QA_SESSION': {

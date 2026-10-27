@@ -416,6 +416,23 @@ button:disabled { cursor: default; }
 .expert-transfer-button { width: 30px; height: 30px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #414653; }
 .expert-transfer-button:hover { background: rgba(20, 25, 40, .06); }
 .expert-transfer-button svg { width: 18px; height: 18px; }
+.expert-transfer-button:disabled { opacity: .4; cursor: not-allowed; }
+.qiniu-preset-panel { border: 1px solid var(--line); border-radius: 12px; margin: 8px 0 10px; background: #fff; }
+.qiniu-preset-panel summary { cursor: pointer; padding: 11px 12px; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.qiniu-preset-panel summary span { font-size: 10px; font-weight: normal; color: var(--muted); }
+.qiniu-preset-content { padding: 2px 11px 12px; display: grid; gap: 8px; }
+.qiniu-preset-content label { color: var(--muted); font-size: 11px; }
+.qiniu-preset-content input { display: block; width: 100%; min-width: 0; height: 34px; box-sizing: border-box; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; background: #fff; color: var(--text); }
+.qiniu-preset-credentials { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.qiniu-preset-credentials label input { margin-top: 4px; }
+.qiniu-preset-help { font-size: 10px; color: var(--muted); line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
+.qiniu-preset-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.qiniu-preset-actions button { padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: #fff; font-size: 11px; color: var(--text); }
+.qiniu-preset-actions button:hover { background: #f4f5f8; }
+.qiniu-preset-actions button:disabled { opacity: .45; cursor: wait; }
+.qiniu-preset-status { min-height: 15px; font-size: 10px; color: var(--muted); line-height: 1.4; margin: 0; overflow-wrap: anywhere; }
+.qiniu-preset-status.error { color: var(--danger); }
+
 
 .wide-create-button {
   width: 100%;

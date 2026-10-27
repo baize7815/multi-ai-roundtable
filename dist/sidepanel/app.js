@@ -4386,6 +4386,143 @@ function mergeExpertPresets(existing, incoming, now, createId) {
   }
   return { presets, added, updated, unchanged };
 }
+function replaceExpertPresets(existing, incoming, now, createId) {
+  const result = mergeExpertPresets(existing, incoming, now, createId);
+  const names = new Set(incoming.map((item) => item.name.trim().toLocaleLowerCase()));
+  return {
+    ...result,
+    // Preserve IDs for matching names so configured providers keep their preset bindings.
+    presets: result.presets.filter((preset) => names.has(preset.name.trim().toLocaleLowerCase()))
+  };
+}
+
+// src/sidepanel/qiniu-presets.ts
+var CLOUD_PRESET_OBJECT_KEY = "multi-ai-roundtable/experts.json";
+var CLOUD_PRESET_MAX_BYTES = 5 * 1024 * 1024;
+var CLOUD_CONFIG_STORAGE_KEY = "multiAiRoundtableQiniuConfigV1";
+var CLOUD_SECRET_SESSION_KEY = "multiAiRoundtableQiniuSecretV1";
+var encoder = new TextEncoder();
+var emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+function parseQiniuEndpoint(input) {
+  let url;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    throw new Error("\u4E03\u725B S3 \u5730\u5740\u65E0\u6548\u3002");
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.port || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("\u8BF7\u8F93\u5165\u5B8C\u6574\u7684 HTTPS S3 \u5B58\u50A8\u6876\u5730\u5740\uFF0C\u4E0D\u8981\u6DFB\u52A0\u8DEF\u5F84\u3001\u7AEF\u53E3\u6216\u53C2\u6570\u3002");
+  }
+  const match = /^([a-z0-9][a-z0-9-]*)\.s3\.([a-z0-9-]+)\.qiniucs\.com$/i.exec(url.hostname);
+  if (!match) throw new Error("\u5730\u5740\u5E94\u4E3A https://\u5B58\u50A8\u6876.s3.\u533A\u57DF.qiniucs.com");
+  return { origin: url.origin, host: url.host, region: match[2] };
+}
+function hex(bytes) {
+  return Array.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+async function sha256(bytes) {
+  return hex(await crypto.subtle.digest("SHA-256", bytes));
+}
+async function hmac(key, content) {
+  const material = typeof key === "string" ? encoder.encode(key) : key;
+  const imported = await crypto.subtle.importKey("raw", material, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", imported, encoder.encode(content)));
+}
+async function signedRequest(method, config, body) {
+  const { origin, host, region } = parseQiniuEndpoint(config.endpoint);
+  const accessKey = config.accessKey.trim();
+  const secretKey = config.secretKey.trim();
+  if (!accessKey || !secretKey) throw new Error("\u8BF7\u586B\u5199\u4E03\u725B\u4E91 AccessKey \u548C SecretKey\u3002");
+  if (!/^[A-Za-z0-9_-]+$/.test(accessKey)) throw new Error("AccessKey \u683C\u5F0F\u65E0\u6548\u3002");
+  const uri = "/" + CLOUD_PRESET_OBJECT_KEY.split("/").map(encodeURIComponent).join("/");
+  const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]|\.\d{3}/g, "");
+  const day = stamp.slice(0, 8);
+  const hash = method === "PUT" ? await sha256(body ?? new Uint8Array()) : emptyHash;
+  const canonicalHeaders = method === "PUT" ? `content-type:application/json
+host:${host}
+x-amz-content-sha256:${hash}
+x-amz-date:${stamp}
+` : `host:${host}
+x-amz-content-sha256:${hash}
+x-amz-date:${stamp}
+`;
+  const signedHeaders = method === "PUT" ? "content-type;host;x-amz-content-sha256;x-amz-date" : "host;x-amz-content-sha256;x-amz-date";
+  const canonicalRequest = [method, uri, "", canonicalHeaders, signedHeaders, hash].join("\n");
+  const scope = `${day}/${region}/s3/aws4_request`;
+  const stringToSign = ["AWS4-HMAC-SHA256", stamp, scope, await sha256(encoder.encode(canonicalRequest))].join("\n");
+  let signingKey = await hmac("AWS4" + secretKey, day);
+  signingKey = await hmac(signingKey, region);
+  signingKey = await hmac(signingKey, "s3");
+  signingKey = await hmac(signingKey, "aws4_request");
+  const signature = hex(await hmac(signingKey, stringToSign));
+  const headers = {
+    "x-amz-content-sha256": hash,
+    "x-amz-date": stamp,
+    Authorization: `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope},SignedHeaders=${signedHeaders},Signature=${signature}`
+  };
+  if (method === "PUT") headers["Content-Type"] = "application/json";
+  let response;
+  try {
+    response = await fetch(origin + uri, {
+      method,
+      headers,
+      ...method === "PUT" ? { body } : {},
+      credentials: "omit",
+      redirect: "error",
+      cache: "no-store"
+    });
+  } catch {
+    throw new Error("\u65E0\u6CD5\u8FDE\u63A5\u4E03\u725B S3\u3002\u8BF7\u68C0\u67E5\u5B58\u50A8\u6876 HTTPS \u5730\u5740\u3001\u7F51\u7EDC\u548C\u6269\u5C55\u6743\u9650\u3002");
+  }
+  if (!response.ok) {
+    const raw = (await response.text().catch(() => "")).slice(0, 4096);
+    const code = /<Code>([A-Za-z0-9_-]+)<\/Code>/.exec(raw)?.[1];
+    throw new Error(`\u4E03\u725B\u4E91 HTTP ${response.status}${code ? " \xB7 " + code : ""}\uFF0C\u8BF7\u6838\u5BF9\u533A\u57DF\u3001\u5BC6\u94A5\u548C\u5B58\u50A8\u7A7A\u95F4\u6743\u9650\u3002`);
+  }
+  return response;
+}
+async function uploadExpertPresetsJson(config, text2) {
+  const bytes = encoder.encode(text2);
+  if (!bytes.length || bytes.length > CLOUD_PRESET_MAX_BYTES) throw new Error("\u9884\u8BBE JSON \u4E3A\u7A7A\u6216\u8D85\u8FC7 5 MiB\u3002");
+  await signedRequest("PUT", config, bytes);
+}
+async function downloadExpertPresetsJson(config) {
+  const response = await signedRequest("GET", config);
+  const declaredLength = response.headers.get("Content-Length");
+  if (declaredLength !== null && Number(declaredLength) > CLOUD_PRESET_MAX_BYTES) {
+    await response.body?.cancel();
+    throw new Error("\u4E91\u7AEF\u9884\u8BBE JSON \u8D85\u8FC7 5 MiB\uFF0C\u5DF2\u62D2\u7EDD\u4E0B\u8F7D\u3002");
+  }
+  if (!response.body) throw new Error("\u65E0\u6CD5\u8BFB\u53D6\u4E91\u7AEF\u54CD\u5E94\u6B63\u6587\u3002");
+  const reader = response.body.getReader();
+  const parts = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > CLOUD_PRESET_MAX_BYTES) throw new Error("\u4E91\u7AEF\u9884\u8BBE JSON \u8D85\u8FC7 5 MiB\uFF0C\u5DF2\u505C\u6B62\u4E0B\u8F7D\u3002");
+      parts.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => void 0);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("\u4E91\u7AEF\u9884\u8BBE JSON \u4E0D\u662F\u6709\u6548\u7684 UTF-8 \u6587\u672C\u3002");
+  }
+}
 
 // src/game/werewolf/rules.ts
 var zeroRoles = () => ({ wolf: 0, villager: 0, seer: 0, witch: 0, hunter: 0 });
@@ -4586,9 +4723,6 @@ function capturePresetAssignments(presetByProvider) {
 }
 function captureExpertAssignments() {
   return capturePresetAssignments(state.settings.expertPresetByProvider);
-}
-function captureQaAssignments() {
-  return capturePresetAssignments(state.settings.qaPresetByProvider);
 }
 function createSession(mode) {
   const session = createConversationSession(mode);
@@ -5586,10 +5720,6 @@ async function handleQaSend() {
   const providers = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
   if (!providers.length) return showComposerError("\u8BF7\u5148\u5728\u8BBE\u7F6E\u91CC\u9009\u62E9\u81F3\u5C11\u4E00\u4E2A\u5DF2\u63A5\u5165\u6A21\u578B");
   await refreshProviderAvailability(providers, false);
-  if (session.messages.length === 0) {
-    session.qaPresetAssignments = captureQaAssignments();
-    session.qaInitializedProviders = [];
-  }
   session.messages.push({ id: id("msg"), role: "user", text: payload.text, attachments: attachmentMetadata(payload), createdAt: Date.now(), status: "completed" });
   if (session.title === "\u65B0\u4F1A\u8BDD") session.title = deriveTitle(payload);
   touchSession(session);
@@ -6139,6 +6269,117 @@ async function importExpertPresets(file) {
     showComposerError(error instanceof Error ? `\u5BFC\u5165\u5931\u8D25\uFF1A${error.message}` : "\u5BFC\u5165\u5931\u8D25\uFF1A\u672A\u77E5\u9519\u8BEF");
   }
 }
+var qiniuPresetBusy = false;
+function showQiniuPresetStatus(message, error = false) {
+  const status = el("qiniuPresetStatus");
+  status.textContent = message;
+  status.classList.toggle("error", error);
+}
+function updateQiniuPresetConfigState() {
+  const configured = Boolean(el("qiniuEndpoint").value.trim() && el("qiniuAccessKey").value.trim() && el("qiniuSecretKey").value.trim());
+  el("qiniuPresetConfigState").textContent = configured ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E";
+}
+async function loadQiniuPresetFields() {
+  const [local, session] = await Promise.all([
+    chrome.storage.local.get(CLOUD_CONFIG_STORAGE_KEY),
+    chrome.storage.session.get(CLOUD_SECRET_SESSION_KEY)
+  ]);
+  const data = local[CLOUD_CONFIG_STORAGE_KEY] ?? {};
+  el("qiniuEndpoint").value = data.endpoint ?? "";
+  el("qiniuAccessKey").value = data.accessKey ?? "";
+  el("qiniuSecretKey").value = typeof session[CLOUD_SECRET_SESSION_KEY] === "string" ? session[CLOUD_SECRET_SESSION_KEY] : "";
+  updateQiniuPresetConfigState();
+}
+async function persistQiniuPresetFields() {
+  const endpoint = el("qiniuEndpoint").value.trim();
+  const accessKey = el("qiniuAccessKey").value.trim();
+  const secretKey = el("qiniuSecretKey").value.trim();
+  parseQiniuEndpoint(endpoint);
+  if (!accessKey) throw new Error("\u8BF7\u586B\u5199\u4E03\u725B\u4E91 AccessKey\u3002");
+  await Promise.all([
+    chrome.storage.local.set({ [CLOUD_CONFIG_STORAGE_KEY]: { endpoint, accessKey } }),
+    secretKey ? chrome.storage.session.set({ [CLOUD_SECRET_SESSION_KEY]: secretKey }) : chrome.storage.session.remove(CLOUD_SECRET_SESSION_KEY)
+  ]);
+  updateQiniuPresetConfigState();
+  return { endpoint, accessKey, secretKey };
+}
+function setQiniuPresetBusy(busy) {
+  qiniuPresetBusy = busy;
+  for (const buttonId of [
+    "cloudUploadExpertsButton",
+    "cloudDownloadExpertsButton",
+    "qiniuSaveConfig",
+    "qiniuUpload",
+    "qiniuDownloadMerge",
+    "qiniuDownloadReplace"
+  ]) {
+    el(buttonId).disabled = busy;
+  }
+}
+async function saveQiniuPresetConfig() {
+  if (qiniuPresetBusy) return;
+  try {
+    setQiniuPresetBusy(true);
+    await persistQiniuPresetFields();
+    showQiniuPresetStatus("\u4E03\u725B\u4E91\u914D\u7F6E\u5DF2\u4FDD\u5B58\u5728\u5F53\u524D\u6D4F\u89C8\u5668\u3002");
+  } catch (error) {
+    showQiniuPresetStatus(error instanceof Error ? error.message : "\u4FDD\u5B58\u914D\u7F6E\u5931\u8D25\u3002", true);
+  } finally {
+    setQiniuPresetBusy(false);
+  }
+}
+async function runQiniuPresetAction(action) {
+  if (qiniuPresetBusy) return;
+  const panel = el("qiniuPresetPanel");
+  const endpoint = el("qiniuEndpoint").value.trim();
+  const accessKey = el("qiniuAccessKey").value.trim();
+  const secretKey = el("qiniuSecretKey").value.trim();
+  if (!endpoint || !accessKey || !secretKey) {
+    panel.open = true;
+    showQiniuPresetStatus("\u8BF7\u5148\u586B\u5199\u5B58\u50A8\u6876 HTTPS \u5730\u5740\u3001AccessKey \u548C SecretKey\u3002", true);
+    return;
+  }
+  if (action === "upload" && !window.confirm("\u4E0A\u4F20\u5C06\u8986\u76D6\u4E91\u7AEF multi-ai-roundtable/experts.json\uFF0C\u7EE7\u7EED\u5417\uFF1F")) return;
+  if (action === "replace" && !window.confirm("\u5C06\u4EE5\u4E91\u7AEF\u9884\u8BBE\u66FF\u6362\u672C\u5730\u9884\u8BBE\u5217\u8868\u3002\u4E91\u7AEF\u4E0D\u5B58\u5728\u7684\u672C\u5730\u9884\u8BBE\u4F1A\u88AB\u5220\u9664\uFF0C\u7EE7\u7EED\u5417\uFF1F")) return;
+  setQiniuPresetBusy(true);
+  panel.open = true;
+  showQiniuPresetStatus(action === "upload" ? "\u6B63\u5728\u4E0A\u4F20\u9884\u8BBE\u2026" : "\u6B63\u5728\u4E0B\u8F7D\u9884\u8BBE\u2026");
+  try {
+    const config = await persistQiniuPresetFields();
+    if (action === "upload") {
+      const latest = await loadState();
+      if (!latest.expertPresets.length) throw new Error("\u672C\u5730\u8FD8\u6CA1\u6709\u53EF\u5907\u4EFD\u7684\u9884\u8BBE\u3002");
+      await uploadExpertPresetsJson(config, JSON.stringify(buildExpertPresetTransferFile(latest.expertPresets)));
+      showQiniuPresetStatus(`\u5DF2\u4E0A\u4F20 ${latest.expertPresets.length} \u6761\u9884\u8BBE\uFF0C\u4E91\u7AEF\u540C\u8DEF\u5F84\u65E7\u5907\u4EFD\u5DF2\u8986\u76D6\u3002`);
+      return;
+    }
+    const incoming = parseExpertPresetTransferFile(await downloadExpertPresetsJson(config));
+    await refreshStateFromStorage();
+    const merged = action === "replace" ? replaceExpertPresets(state.expertPresets, incoming, Date.now(), () => id("expert")) : mergeExpertPresets(state.expertPresets, incoming, Date.now(), () => id("expert"));
+    state.expertPresets = merged.presets;
+    if (action === "replace") {
+      const validIds = new Set(state.expertPresets.map((preset) => preset.id));
+      for (const provider of PROVIDERS) {
+        if (state.settings.expertPresetByProvider[provider.id] && !validIds.has(state.settings.expertPresetByProvider[provider.id])) {
+          delete state.settings.expertPresetByProvider[provider.id];
+        }
+        if (state.settings.qaPresetByProvider[provider.id] && !validIds.has(state.settings.qaPresetByProvider[provider.id])) {
+          delete state.settings.qaPresetByProvider[provider.id];
+        }
+      }
+    }
+    syncBlankExpertSessionAssignments();
+    await saveState(state);
+    closeExpertEditor();
+    renderExpertPresets();
+    renderSettings();
+    showQiniuPresetStatus(action === "replace" ? `\u4E91\u7AEF\u66FF\u6362\u5B8C\u6210\uFF1A\u5F53\u524D ${state.expertPresets.length} \u6761\u9884\u8BBE\u3002` : `\u4E91\u7AEF\u5408\u5E76\u5B8C\u6210\uFF1A\u65B0\u589E ${merged.added}\u3001\u66F4\u65B0 ${merged.updated}\u3001\u672A\u53D8 ${merged.unchanged}\u3002`);
+  } catch (error) {
+    showQiniuPresetStatus(error instanceof Error ? error.message : "\u4E03\u725B\u4E91\u64CD\u4F5C\u5931\u8D25\u3002", true);
+  } finally {
+    setQiniuPresetBusy(false);
+  }
+}
 function sessionMarkdown(session) {
   const lines = [`# ${session.title}`, "", `- \u7C7B\u578B\uFF1A${modeLabel(session.mode)}`, `- \u521B\u5EFA\u65F6\u95F4\uFF1A${new Date(session.createdAt).toLocaleString()}`, `- \u66F4\u65B0\u65F6\u95F4\uFF1A${new Date(session.updatedAt).toLocaleString()}`];
   if (session.mode === "expert") {
@@ -6495,6 +6736,7 @@ function wireEvents() {
   el("expertPresetButton").addEventListener("click", () => {
     renderExpertPresets();
     openOverlay("expertOverlay");
+    void loadQiniuPresetFields().catch(() => showQiniuPresetStatus("\u8BFB\u53D6\u672C\u5730\u4E03\u725B\u4E91\u914D\u7F6E\u5931\u8D25\u3002", true));
   });
   el("historyButton").addEventListener("click", () => {
     renderHistory();
@@ -6517,6 +6759,15 @@ function wireEvents() {
     expertImportInput.click();
   });
   el("exportExpertsButton").addEventListener("click", exportExpertPresets);
+  el("cloudUploadExpertsButton").addEventListener("click", () => void runQiniuPresetAction("upload"));
+  el("cloudDownloadExpertsButton").addEventListener("click", () => void runQiniuPresetAction("merge"));
+  el("qiniuSaveConfig").addEventListener("click", () => void saveQiniuPresetConfig());
+  el("qiniuUpload").addEventListener("click", () => void runQiniuPresetAction("upload"));
+  el("qiniuDownloadMerge").addEventListener("click", () => void runQiniuPresetAction("merge"));
+  el("qiniuDownloadReplace").addEventListener("click", () => void runQiniuPresetAction("replace"));
+  for (const id2 of ["qiniuEndpoint", "qiniuAccessKey", "qiniuSecretKey"]) {
+    el(id2).addEventListener("input", updateQiniuPresetConfigState);
+  }
   expertImportInput.addEventListener("change", () => {
     const file = expertImportInput.files?.[0];
     expertImportInput.value = "";

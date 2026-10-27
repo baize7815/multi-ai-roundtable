@@ -86,3 +86,17 @@ export function mergeExpertPresets(
 
   return { presets, added, updated, unchanged };
 }
+export function replaceExpertPresets(
+  existing: ExpertPreset[],
+  incoming: PortableExpertPreset[],
+  now: number,
+  createId: () => string
+): { presets: ExpertPreset[]; added: number; updated: number; unchanged: number } {
+  const result = mergeExpertPresets(existing, incoming, now, createId);
+  const names = new Set(incoming.map((item) => item.name.trim().toLocaleLowerCase()));
+  return {
+    ...result,
+    // Preserve IDs for matching names so configured providers keep their preset bindings.
+    presets: result.presets.filter((preset) => names.has(preset.name.trim().toLocaleLowerCase()))
+  };
+}
