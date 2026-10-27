@@ -103,6 +103,7 @@ var DEFAULT_STATE = {
   settings: {
     replyAcceleration: true,
     qaProviders: ["doubao", "deepseek"],
+    qaPresetByProvider: {},
     roundtableProviders: ["doubao", "deepseek"],
     werewolfProviders: ["doubao", "deepseek", "kimi", "qwen", "zhipu", "gpt", "gemini", "grok"],
     clocktowerProviders: ["doubao", "deepseek", "kimi", "qwen", "zhipu", "gpt", "gemini", "grok"],
@@ -168,6 +169,7 @@ function migrateLegacy(legacy) {
     settings: {
       replyAcceleration: true,
       qaProviders: legacy.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
+      qaPresetByProvider: {},
       roundtableProviders: legacy.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: DEFAULT_STATE.settings.werewolfProviders,
       clocktowerProviders: DEFAULT_STATE.settings.clocktowerProviders,
@@ -198,6 +200,7 @@ async function loadState() {
     settings: {
       replyAcceleration: stored.settings?.replyAcceleration ?? true,
       qaProviders: stored.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
+      qaPresetByProvider: stored.settings?.qaPresetByProvider ?? {},
       roundtableProviders: stored.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: stored.settings?.werewolfProviders ?? DEFAULT_STATE.settings.werewolfProviders,
       clocktowerProviders: stored.settings?.clocktowerProviders ?? DEFAULT_STATE.settings.clocktowerProviders,
@@ -263,6 +266,14 @@ ${message.text}`).join("\n\n") : "\u8BF7\u7EE7\u7EED\u8BA8\u8BBA\uFF0C\u8865\u51
 
 \u8BF7\u57FA\u4E8E\u4EE5\u4E0A\u4F60\u5C1A\u672A\u770B\u5230\u7684\u65B0\u589E\u5185\u5BB9\u7EE7\u7EED\u8BA8\u8BBA\u3002\u907F\u514D\u590D\u8FF0\u5DF2\u6709\u5185\u5BB9\uFF0C\u76F4\u63A5\u56DE\u5E94\u5E76\u63A8\u8FDB\u8BA8\u8BBA\u3002`;
 }
+function withQaPreset(session, provider, payload) {
+  if (session.mode !== "qa" || session.qaInitializedProviders?.includes(provider)) return payload;
+  const preset = session.qaPresetAssignments?.[provider];
+  if (!preset?.prompt.trim()) return payload;
+  return { ...payload, text: `${preset.prompt.trim()}
+
+${payload.text}` };
+}
 function withExpertPreset(session, provider, prompt) {
   if (session.mode !== "expert") return prompt;
   const initialized = session.expertInitializedProviders?.includes(provider) ?? false;
@@ -304,6 +315,7 @@ function createBackgroundOrchestrator(bridge) {
     return mutatePersistedState((state) => {
       const session = sessionById(state, sessionId);
       const operationId = id("op");
+      const providerPayload = withQaPreset(session, provider, payload);
       const message = {
         id: id("msg"),
         role: "assistant",
@@ -317,7 +329,7 @@ function createBackgroundOrchestrator(bridge) {
         messageId: message.id,
         provider,
         mode: session.mode,
-        payload,
+        payload: providerPayload,
         startedAt: Date.now(),
         phase: "preparing"
       };
@@ -356,7 +368,7 @@ function createBackgroundOrchestrator(bridge) {
       const session = sessionById(latest, sessionId);
       if (!session.pendingOperations?.[operation.operationId]) return;
       const binding = session.bindings[provider];
-      await bridge.send(provider, operation.operationId, payload, binding?.tabId ?? tabId, binding?.conversationUrl ?? conversationUrl);
+      await bridge.send(provider, operation.operationId, operation.payload, binding?.tabId ?? tabId, binding?.conversationUrl ?? conversationUrl);
     } catch (error) {
       await failOperation(sessionId, operation.operationId, error);
     }
@@ -504,6 +516,9 @@ function createBackgroundOrchestrator(bridge) {
           message.error = void 0;
         }
         delete session.pendingOperations?.[operation.operationId];
+        if (session.mode === "qa" && !session.qaInitializedProviders?.includes(operation.provider)) {
+          session.qaInitializedProviders = [...session.qaInitializedProviders ?? [], operation.provider];
+        }
         const execution = session.execution;
         if (execution?.currentOperationId === operation.operationId) {
           execution.currentOperationId = void 0;
@@ -589,6 +604,7 @@ function createBackgroundOrchestrator(bridge) {
           if (session.execution) session.execution.targetRounds = update.rounds;
         }
         if (update.title !== void 0) session.title = update.title;
+        if (update.qaPresetAssignments && !session.messages.some((message) => message.role === "assistant")) session.qaPresetAssignments = update.qaPresetAssignments;
         if (update.expertAssignments && !session.messages.some((message) => message.role === "assistant")) session.expertAssignments = update.expertAssignments;
         touch(session);
       }

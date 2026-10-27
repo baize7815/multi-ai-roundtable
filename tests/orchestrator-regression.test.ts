@@ -78,6 +78,51 @@ await waitUntil(async () => {
   return session.messages.filter((message) => message.role === 'assistant' && message.status === 'completed').length === 2;
 });
 assert.deepEqual(new Set(sends.map((item) => item.provider)), new Set<ProviderId>(['doubao', 'deepseek']));
+assert.ok(sends.every((item) => item.payload.text === 'QA 回归'), '未选择预设的既有会话必须保持原始提问');
+
+const qaWithPresets = storage.createConversationSession('qa');
+await resetSessions([qaWithPresets]);
+await orchestrator.applyUiPatch({ sessions: [{
+  id: qaWithPresets.id,
+  addedMessages: [userMessage('预设首问')],
+  qaPresetAssignments: {
+    doubao: { presetId: 'preset-a', name: '产品经理', prompt: 'QA_PRESET_A：从产品视角回答。' },
+    deepseek: { presetId: 'preset-b', name: '工程师', prompt: 'QA_PRESET_B：从技术视角回答。' }
+  }
+}] });
+await orchestrator.startQa({ sessionId: qaWithPresets.id, providers: ['doubao', 'deepseek'], payload: { text: '预设首问', attachments: [] } });
+await waitUntil(async () => {
+  const session = (await storage.loadState()).conversations.find((item) => item.id === qaWithPresets.id)!;
+  return session.qaInitializedProviders?.length === 2;
+});
+assert.match(sends.find((item) => item.provider === 'doubao')!.payload.text, /^QA_PRESET_A：.*\n\n预设首问$/s);
+assert.match(sends.find((item) => item.provider === 'deepseek')!.payload.text, /^QA_PRESET_B：.*\n\n预设首问$/s);
+assert.doesNotMatch(sends.find((item) => item.provider === 'doubao')!.payload.text, /QA_PRESET_B/);
+assert.doesNotMatch(sends.find((item) => item.provider === 'deepseek')!.payload.text, /QA_PRESET_A/);
+const firstState = await storage.loadState();
+const firstSession = firstState.conversations.find((item) => item.id === qaWithPresets.id)!;
+assert.deepEqual(firstSession.messages.filter((item) => item.role === 'user').map((item) => item.text), ['预设首问'], '会话中不应显示注入的预设内容');
+firstState.expertPresets = [{ id: 'preset-a', name: '已修改', prompt: 'SHOULD_NOT_APPEAR', createdAt: 0, updatedAt: 1 }];
+firstState.settings.qaPresetByProvider = { doubao: 'preset-a' };
+await storage.saveState(firstState);
+await orchestrator.startQa({ sessionId: qaWithPresets.id, providers: ['doubao', 'deepseek'], payload: { text: '预设追问', attachments: [] } });
+await waitUntil(async () => {
+  const session = (await storage.loadState()).conversations.find((item) => item.id === qaWithPresets.id)!;
+  return session.messages.filter((item) => item.role === 'assistant' && item.status === 'completed').length === 4;
+});
+assert.deepEqual(sends.slice(-2).map((item) => item.payload.text), ['预设追问', '预设追问'], '后续回复不应重复注入预设，修改设置也不应改变既有会话');
+
+const unselected = storage.createConversationSession('qa');
+unselected.messages.push(userMessage('无预设'));
+unselected.qaPresetAssignments = { doubao: { presetId: 'preset-a', name: '产品经理', prompt: 'QA_PRESET_A' } };
+await resetSessions([unselected]);
+await orchestrator.startQa({ sessionId: unselected.id, providers: ['deepseek'], payload: { text: '无预设', attachments: [] } });
+await waitUntil(async () => {
+  const session = (await storage.loadState()).conversations.find((item) => item.id === unselected.id)!;
+  return session.messages.filter((message) => message.role === 'assistant' && message.status === 'completed').length === 1;
+});
+assert.equal(sends[0].payload.text, '无预设', '未选择预设的模型须正常发送原文');
+
 
 const roundtable = storage.createConversationSession('roundtable');
 roundtable.messages.push(userMessage('圆桌回归'));

@@ -41,9 +41,9 @@
   </tr>
 </table>
 
-### 专家预设、历史记录和设置
+### 对话预设、专家预设、历史记录和设置
 
-对话可以回到历史中查看，专家团可以调整各模型的分工；模型选择和常用选项也集中在侧栏。
+在「设置 → AI 对话」中，可分别为各 AI 选择预设，默认「无预设」。每个模型仅在新会话首次发言时注入一次选定提示词，后续追问不重复注入；预设作为会话快照保存，修改设置不会影响历史对话。预设管理与专家团共用。历史记录、模型选择和常用选项也集中在侧栏。
 
 <details>
 <summary><strong>展开更多实机截图（专家团设置 · 会话历史 · 设置）</strong></summary>
@@ -66,11 +66,11 @@
 
 | 你想做什么 | 交给 Multi AI Roundtable |
 | --- | --- |
-| 「同一道题，让 GPT、Kimi 和 DeepSeek 都回答」 | **AI 对话**：多个网页 AI 并行作答，方便直接比较 |
+| 「同一道题，让 GPT、Kimi 和 DeepSeek 都回答」 | **AI 对话**：多个网页 AI 并行作答，可为每个模型单独选择提示词预设，默认不注入 |
 | 「让几个 AI 轮流讨论一个产品方案」 | **AI 圆桌**：严格串行接力，多轮共享讨论上下文 |
 | 「产品经理、开发、设计师分别评审这个想法」 | **AI 专家团**：为不同模型设置独立专家角色与任务分工 |
 | 「让 AI 自己玩一局狼人杀」 | **AI 狼人杀**：独立引擎管理秘密身份、行动、发言和投票 |
-| 「尝试多人隐藏信息推理」 | **AI 迷雾议会**：公开 v0.2.0 包含原创信号推理与密封表决模式 |
+| 「尝试多人隐藏信息推理」 | **AI 迷雾议会**：此发行分支包含经典玩法恢复版本，详见 [本地恢复说明](docs/LOCAL_CLASSIC_RESTORATION.md) |
 | 「找回之前的讨论」 | **会话历史**：集中查看、管理和继续已有会话 |
 
 **不是把十家网站做成十个 iframe。** 扩展针对各站点使用独立的网页适配脚本，根据模式管理发送、回复、回合及会话存储。游戏的隐藏行动不会自动广播到公开讨论中。
@@ -85,13 +85,12 @@
 
 ### 安装发行版（推荐）
 
-1. 打开 **[Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest)**，下载 `Multi-AI-Roundtable-v0.2.0.zip`。
+1. 打开 **[Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest)**，下载 `Multi-AI-Roundtable-v0.2.2.zip`。
 2. 解压 ZIP，打开 Chrome 的 `chrome://extensions/`，开启右上角的 **开发者模式**。
 3. 点击 **加载已解压的扩展程序**，选择解压得到的 **`dist/` 文件夹**。
 4. 登录准备使用的 AI 网站，打开扩展侧栏，选择模型和模式即可。
 
-> GitHub 当前公开发行版是 **v0.2.0**。本地开发分支和未公开实验功能不属于 Release；下载和安装请以发行页为准。
-> **本地分支提示**：当前工作目录仍是尚未公开的经典玩法恢复版（v0.2.1）。本地回归请运行 `npm run test:clocktower`；GitHub `main` 与官方 Release 仍为 v0.2.0。
+> **v0.2.2** 基于公开的 `v0.2.1-local-classic` 分支发行，新增 AI 对话独立预设。GitHub `main` 暂不与此分支合并，下载以 [Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest) 为准。经典游戏引擎的完整自动模拟仍未通过稳定验收。
 
 ### 从源码构建（Node.js 22+）
 
@@ -101,7 +100,7 @@ cd multi-ai-roundtable
 npm ci
 npm run typecheck
 npm run test:werewolf
-npm run test:fog-council
+npm run test:clocktower
 npm run build
 ```
 

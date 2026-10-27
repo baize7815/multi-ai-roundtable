@@ -66,6 +66,13 @@ function buildSequentialPrompt(session: ConversationSession, provider: ProviderI
   return `${body}\n\n请基于以上你尚未看到的新增内容继续讨论。避免复述已有内容，直接回应并推进讨论。`;
 }
 
+function withQaPreset(session: ConversationSession, provider: ProviderId, payload: ComposerPayload): ComposerPayload {
+  if (session.mode !== 'qa' || session.qaInitializedProviders?.includes(provider)) return payload;
+  const preset = session.qaPresetAssignments?.[provider];
+  if (!preset?.prompt.trim()) return payload;
+  return { ...payload, text: `${preset.prompt.trim()}\n\n${payload.text}` };
+}
+
 function withExpertPreset(session: ConversationSession, provider: ProviderId, prompt: string): string {
   if (session.mode !== 'expert') return prompt;
   const initialized = session.expertInitializedProviders?.includes(provider) ?? false;
@@ -113,6 +120,7 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
     return mutatePersistedState((state) => {
       const session = sessionById(state, sessionId);
       const operationId = id('op');
+      const providerPayload = withQaPreset(session, provider, payload);
       const message: ChatMessage = {
         id: id('msg'),
         role: 'assistant',
@@ -126,7 +134,7 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
         messageId: message.id,
         provider,
         mode: session.mode,
-        payload,
+        payload: providerPayload,
         startedAt: Date.now(),
         phase: 'preparing'
       };
@@ -167,7 +175,7 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
       const session = sessionById(latest, sessionId);
       if (!session.pendingOperations?.[operation.operationId]) return;
       const binding = session.bindings[provider];
-      await bridge.send(provider, operation.operationId, payload, binding?.tabId ?? tabId, binding?.conversationUrl ?? conversationUrl);
+      await bridge.send(provider, operation.operationId, operation.payload, binding?.tabId ?? tabId, binding?.conversationUrl ?? conversationUrl);
     } catch (error) {
       await failOperation(sessionId, operation.operationId, error);
     }
@@ -321,6 +329,9 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
           message.error = undefined;
         }
         delete session.pendingOperations?.[operation.operationId];
+        if (session.mode === 'qa' && !session.qaInitializedProviders?.includes(operation.provider)) {
+          session.qaInitializedProviders = [...(session.qaInitializedProviders ?? []), operation.provider];
+        }
         const execution = session.execution;
         if (execution?.currentOperationId === operation.operationId) {
           execution.currentOperationId = undefined;
@@ -394,7 +405,7 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
     activeConversationIds?: PersistedState['activeConversationIds'];
     settings?: Partial<PersistedState['settings']>;
     expertPresets?: PersistedState['expertPresets'];
-    sessions?: { id: string; created?: ConversationSession; addedMessages?: ChatMessage[]; rounds?: number; expertAssignments?: ConversationSession['expertAssignments']; title?: string }[];
+    sessions?: { id: string; created?: ConversationSession; addedMessages?: ChatMessage[]; rounds?: number; qaPresetAssignments?: ConversationSession['qaPresetAssignments']; expertAssignments?: ConversationSession['expertAssignments']; title?: string }[];
     deletedSessionIds?: string[];
   }): Promise<void> {
     await mutatePersistedState((state) => {
@@ -419,6 +430,7 @@ export function createBackgroundOrchestrator(bridge: ProviderBridge) {
           if (session.execution) session.execution.targetRounds = update.rounds;
         }
         if (update.title !== undefined) session.title = update.title;
+        if (update.qaPresetAssignments && !session.messages.some((message) => message.role === 'assistant')) session.qaPresetAssignments = update.qaPresetAssignments;
         if (update.expertAssignments && !session.messages.some((message) => message.role === 'assistant')) session.expertAssignments = update.expertAssignments;
         touch(session);
       }

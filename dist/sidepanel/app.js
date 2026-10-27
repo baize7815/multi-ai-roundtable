@@ -4214,6 +4214,7 @@ var DEFAULT_STATE = {
   settings: {
     replyAcceleration: true,
     qaProviders: ["doubao", "deepseek"],
+    qaPresetByProvider: {},
     roundtableProviders: ["doubao", "deepseek"],
     werewolfProviders: ["doubao", "deepseek", "kimi", "qwen", "zhipu", "gpt", "gemini", "grok"],
     clocktowerProviders: ["doubao", "deepseek", "kimi", "qwen", "zhipu", "gpt", "gemini", "grok"],
@@ -4279,6 +4280,7 @@ function migrateLegacy(legacy) {
     settings: {
       replyAcceleration: true,
       qaProviders: legacy.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
+      qaPresetByProvider: {},
       roundtableProviders: legacy.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: DEFAULT_STATE.settings.werewolfProviders,
       clocktowerProviders: DEFAULT_STATE.settings.clocktowerProviders,
@@ -4309,6 +4311,7 @@ async function loadState() {
     settings: {
       replyAcceleration: stored.settings?.replyAcceleration ?? true,
       qaProviders: stored.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
+      qaPresetByProvider: stored.settings?.qaPresetByProvider ?? {},
       roundtableProviders: stored.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: stored.settings?.werewolfProviders ?? DEFAULT_STATE.settings.werewolfProviders,
       clocktowerProviders: stored.settings?.clocktowerProviders ?? DEFAULT_STATE.settings.clocktowerProviders,
@@ -4520,7 +4523,7 @@ async function saveState(nextState) {
   const baseline = uiBaseline;
   const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
   const settings = {};
-  for (const key of ["replyAcceleration", "qaProviders", "roundtableProviders", "werewolfProviders", "clocktowerProviders", "expertPresetByProvider"]) {
+  for (const key of ["replyAcceleration", "qaProviders", "qaPresetByProvider", "roundtableProviders", "werewolfProviders", "clocktowerProviders", "expertPresetByProvider"]) {
     if (changed(nextState.settings[key], baseline.settings[key])) Object.assign(settings, { [key]: nextState.settings[key] });
   }
   const sessions = nextState.conversations.flatMap((session) => {
@@ -4532,7 +4535,8 @@ async function saveState(nextState) {
       addedMessages,
       ...session.rounds !== previous.rounds ? { rounds: session.rounds } : {},
       ...session.title !== previous.title ? { title: session.title } : {},
-      ...changed(session.expertAssignments, previous.expertAssignments) ? { expertAssignments: session.expertAssignments } : {}
+      ...changed(session.expertAssignments, previous.expertAssignments) ? { expertAssignments: session.expertAssignments } : {},
+      ...changed(session.qaPresetAssignments, previous.qaPresetAssignments) ? { qaPresetAssignments: session.qaPresetAssignments } : {}
     };
     return addedMessages.length || Object.keys(update).length > 2 ? [update] : [];
   });
@@ -4571,14 +4575,20 @@ function providersForMode(mode) {
 function sessionById(sessionId) {
   return state.conversations.find((session) => session.id === sessionId);
 }
-function captureExpertAssignments() {
+function capturePresetAssignments(presetByProvider) {
   const result = {};
   for (const provider of PROVIDERS) {
-    const presetId = state.settings.expertPresetByProvider[provider.id];
+    const presetId = presetByProvider[provider.id];
     const preset = presetId ? state.expertPresets.find((item) => item.id === presetId) : void 0;
     if (preset) result[provider.id] = { presetId: preset.id, name: preset.name, prompt: preset.prompt };
   }
   return result;
+}
+function captureExpertAssignments() {
+  return capturePresetAssignments(state.settings.expertPresetByProvider);
+}
+function captureQaAssignments() {
+  return capturePresetAssignments(state.settings.qaPresetByProvider);
 }
 function createSession(mode) {
   const session = createConversationSession(mode);
@@ -5576,6 +5586,10 @@ async function handleQaSend() {
   const providers = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
   if (!providers.length) return showComposerError("\u8BF7\u5148\u5728\u8BBE\u7F6E\u91CC\u9009\u62E9\u81F3\u5C11\u4E00\u4E2A\u5DF2\u63A5\u5165\u6A21\u578B");
   await refreshProviderAvailability(providers, false);
+  if (session.messages.length === 0) {
+    session.qaPresetAssignments = captureQaAssignments();
+    session.qaInitializedProviders = [];
+  }
   session.messages.push({ id: id("msg"), role: "user", text: payload.text, attachments: attachmentMetadata(payload), createdAt: Date.now(), status: "completed" });
   if (session.title === "\u65B0\u4F1A\u8BDD") session.title = deriveTitle(payload);
   touchSession(session);
@@ -5675,6 +5689,27 @@ function providerOptionBase(providerId, checked) {
   }
   return { row, checkbox };
 }
+function createPresetSelect(selectedId, title, onChange) {
+  const select = document.createElement("select");
+  select.className = "expert-select";
+  select.title = title;
+  select.setAttribute("aria-label", title);
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "\u65E0\u9884\u8BBE";
+  select.append(none);
+  for (const preset of state.expertPresets) {
+    const option = document.createElement("option");
+    option.value = preset.id;
+    option.textContent = preset.name;
+    select.append(option);
+  }
+  select.value = selectedId ?? "";
+  select.addEventListener("change", () => {
+    void onChange(select.value);
+  });
+  return select;
+}
 function renderQaSettings() {
   const container = el("qaProviderSettings");
   container.replaceChildren();
@@ -5686,6 +5721,13 @@ function renderQaSettings() {
       state.settings.qaProviders = PROVIDERS.map((item) => item.id).filter((providerId) => set.has(providerId));
       await saveState(state);
     });
+    if (provider.enabled) {
+      row.append(createPresetSelect(state.settings.qaPresetByProvider[provider.id], `${provider.label} \u5BF9\u8BDD\u9884\u8BBE`, async (presetId) => {
+        if (presetId) state.settings.qaPresetByProvider[provider.id] = presetId;
+        else delete state.settings.qaPresetByProvider[provider.id];
+        await saveState(state);
+      }));
+    }
     container.append(row);
   }
 }
@@ -5721,27 +5763,12 @@ function renderSequentialSettings(mode, containerId) {
       renderSequentialSettings(mode, containerId);
     });
     if (provider.enabled) {
-      const select = document.createElement("select");
-      select.className = "expert-select";
-      select.title = "\u9009\u62E9\u4E13\u5BB6\u9884\u8BBE";
-      const none = document.createElement("option");
-      none.value = "";
-      none.textContent = "None";
-      select.append(none);
-      for (const preset of state.expertPresets) {
-        const option = document.createElement("option");
-        option.value = preset.id;
-        option.textContent = preset.name;
-        select.append(option);
-      }
-      select.value = state.settings.expertPresetByProvider[provider.id] ?? "";
-      select.addEventListener("change", async () => {
-        if (select.value) state.settings.expertPresetByProvider[provider.id] = select.value;
+      row.append(createPresetSelect(state.settings.expertPresetByProvider[provider.id], `${provider.label} \u4E13\u5BB6\u9884\u8BBE`, async (presetId) => {
+        if (presetId) state.settings.expertPresetByProvider[provider.id] = presetId;
         else delete state.settings.expertPresetByProvider[provider.id];
         syncBlankExpertSessionAssignments();
         await saveState(state);
-      });
-      row.append(select);
+      }));
     }
     if (provider.enabled && checkbox.checked) {
       const index = selectedProviders(mode).indexOf(provider.id);
@@ -6043,6 +6070,7 @@ function renderExpertPresets() {
       state.expertPresets = state.expertPresets.filter((item) => item.id !== preset.id);
       for (const provider of PROVIDERS) {
         if (state.settings.expertPresetByProvider[provider.id] === preset.id) delete state.settings.expertPresetByProvider[provider.id];
+        if (state.settings.qaPresetByProvider[provider.id] === preset.id) delete state.settings.qaPresetByProvider[provider.id];
       }
       syncBlankExpertSessionAssignments();
       await saveState(state);

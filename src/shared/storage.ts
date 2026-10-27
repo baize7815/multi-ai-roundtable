@@ -8,6 +8,7 @@ export const DEFAULT_STATE: PersistedState = {
   settings: {
     replyAcceleration: true,
     qaProviders: ['doubao', 'deepseek'],
+    qaPresetByProvider: {},
     roundtableProviders: ['doubao', 'deepseek'],
     werewolfProviders: ['doubao', 'deepseek', 'kimi', 'qwen', 'zhipu', 'gpt', 'gemini', 'grok'],
     clocktowerProviders: ['doubao', 'deepseek', 'kimi', 'qwen', 'zhipu', 'gpt', 'gemini', 'grok'],
@@ -86,6 +87,7 @@ function migrateLegacy(legacy: LegacyState): PersistedState {
     settings: {
       replyAcceleration: true,
       qaProviders: legacy.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
+      qaPresetByProvider: {},
       roundtableProviders: legacy.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: DEFAULT_STATE.settings.werewolfProviders,
       clocktowerProviders: DEFAULT_STATE.settings.clocktowerProviders,
@@ -117,6 +119,7 @@ export async function loadState(): Promise<PersistedState> {
     settings: {
       replyAcceleration: stored.settings?.replyAcceleration ?? true,
       qaProviders: stored.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
+      qaPresetByProvider: stored.settings?.qaPresetByProvider ?? {},
       roundtableProviders: stored.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: stored.settings?.werewolfProviders ?? DEFAULT_STATE.settings.werewolfProviders,
       clocktowerProviders: stored.settings?.clocktowerProviders ?? DEFAULT_STATE.settings.clocktowerProviders,

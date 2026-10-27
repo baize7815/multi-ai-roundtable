@@ -81,10 +81,10 @@ async function saveState(nextState: PersistedState): Promise<void> {
   const baseline = uiBaseline;
   const changed = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
   const settings: Partial<PersistedState['settings']> = {};
-  for (const key of ['replyAcceleration', 'qaProviders', 'roundtableProviders', 'werewolfProviders', 'clocktowerProviders', 'expertPresetByProvider'] as const) {
+  for (const key of ['replyAcceleration', 'qaProviders', 'qaPresetByProvider', 'roundtableProviders', 'werewolfProviders', 'clocktowerProviders', 'expertPresetByProvider'] as const) {
     if (changed(nextState.settings[key], baseline.settings[key])) Object.assign(settings, { [key]: nextState.settings[key] });
   }
-  const sessions = nextState.conversations.flatMap<{ id: string; created?: ConversationSession; addedMessages?: ChatMessage[]; rounds?: number; expertAssignments?: ConversationSession['expertAssignments']; title?: string }>((session) => {
+  const sessions = nextState.conversations.flatMap<{ id: string; created?: ConversationSession; addedMessages?: ChatMessage[]; rounds?: number; qaPresetAssignments?: ConversationSession['qaPresetAssignments']; expertAssignments?: ConversationSession['expertAssignments']; title?: string }>((session) => {
     const previous = baseline.conversations.find((item) => item.id === session.id);
     if (!previous) return [{ id: session.id, created: structuredClone(session) }];
     const addedMessages = session.messages.filter((message) => message.role === 'user' && !previous.messages.some((item) => item.id === message.id));
@@ -93,7 +93,8 @@ async function saveState(nextState: PersistedState): Promise<void> {
       addedMessages,
       ...(session.rounds !== previous.rounds ? { rounds: session.rounds } : {}),
       ...(session.title !== previous.title ? { title: session.title } : {}),
-      ...(changed(session.expertAssignments, previous.expertAssignments) ? { expertAssignments: session.expertAssignments } : {})
+      ...(changed(session.expertAssignments, previous.expertAssignments) ? { expertAssignments: session.expertAssignments } : {}),
+      ...(changed(session.qaPresetAssignments, previous.qaPresetAssignments) ? { qaPresetAssignments: session.qaPresetAssignments } : {})
     };
     return addedMessages.length || Object.keys(update).length > 2 ? [update] : [];
   });
@@ -139,14 +140,22 @@ function sessionById(sessionId: string): ConversationSession | undefined {
   return state.conversations.find((session) => session.id === sessionId);
 }
 
-function captureExpertAssignments(): Partial<Record<ProviderId, ExpertAssignmentSnapshot>> {
+function capturePresetAssignments(presetByProvider: Partial<Record<ProviderId, string>>): Partial<Record<ProviderId, ExpertAssignmentSnapshot>> {
   const result: Partial<Record<ProviderId, ExpertAssignmentSnapshot>> = {};
   for (const provider of PROVIDERS) {
-    const presetId = state.settings.expertPresetByProvider[provider.id];
+    const presetId = presetByProvider[provider.id];
     const preset = presetId ? state.expertPresets.find((item) => item.id === presetId) : undefined;
     if (preset) result[provider.id] = { presetId: preset.id, name: preset.name, prompt: preset.prompt };
   }
   return result;
+}
+
+function captureExpertAssignments(): Partial<Record<ProviderId, ExpertAssignmentSnapshot>> {
+  return capturePresetAssignments(state.settings.expertPresetByProvider);
+}
+
+function captureQaAssignments(): Partial<Record<ProviderId, ExpertAssignmentSnapshot>> {
+  return capturePresetAssignments(state.settings.qaPresetByProvider);
 }
 
 function createSession(mode: ConversationMode): ConversationSession {
@@ -1353,6 +1362,11 @@ async function handleQaSend(): Promise<void> {
   const providers = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
   if (!providers.length) return showComposerError('请先在设置里选择至少一个已接入模型');
   await refreshProviderAvailability(providers, false);
+  // Snapshot presets only when this conversation first sends. Existing chats retain their original configuration.
+  if (session.messages.length === 0) {
+    session.qaPresetAssignments = captureQaAssignments();
+    session.qaInitializedProviders = [];
+  }
   session.messages.push({ id: id('msg'), role: 'user', text: payload.text, attachments: attachmentMetadata(payload), createdAt: Date.now(), status: 'completed' });
   if (session.title === '新会话') session.title = deriveTitle(payload);
   touchSession(session);
@@ -1553,6 +1567,26 @@ function providerOptionBase(providerId: ProviderId, checked: boolean): { row: HT
   return { row, checkbox };
 }
 
+function createPresetSelect(selectedId: string | undefined, title: string, onChange: (presetId: string) => Promise<void>): HTMLSelectElement {
+  const select = document.createElement('select');
+  select.className = 'expert-select';
+  select.title = title;
+  select.setAttribute('aria-label', title);
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = '无预设';
+  select.append(none);
+  for (const preset of state.expertPresets) {
+    const option = document.createElement('option');
+    option.value = preset.id;
+    option.textContent = preset.name;
+    select.append(option);
+  }
+  select.value = selectedId ?? '';
+  select.addEventListener('change', () => { void onChange(select.value); });
+  return select;
+}
+
 function renderQaSettings(): void {
   const container = el<HTMLElement>('qaProviderSettings');
   container.replaceChildren();
@@ -1564,6 +1598,13 @@ function renderQaSettings(): void {
       state.settings.qaProviders = PROVIDERS.map((item) => item.id).filter((providerId) => set.has(providerId));
       await saveState(state);
     });
+    if (provider.enabled) {
+      row.append(createPresetSelect(state.settings.qaPresetByProvider[provider.id], `${provider.label} 对话预设`, async (presetId) => {
+        if (presetId) state.settings.qaPresetByProvider[provider.id] = presetId;
+        else delete state.settings.qaPresetByProvider[provider.id];
+        await saveState(state);
+      }));
+    }
     container.append(row);
   }
 }
@@ -1605,27 +1646,12 @@ function renderSequentialSettings(mode: SequentialMode, containerId: string): vo
     });
 
     if (provider.enabled) {
-      const select = document.createElement('select');
-      select.className = 'expert-select';
-      select.title = '选择专家预设';
-      const none = document.createElement('option');
-      none.value = '';
-      none.textContent = 'None';
-      select.append(none);
-      for (const preset of state.expertPresets) {
-        const option = document.createElement('option');
-        option.value = preset.id;
-        option.textContent = preset.name;
-        select.append(option);
-      }
-      select.value = state.settings.expertPresetByProvider[provider.id] ?? '';
-      select.addEventListener('change', async () => {
-        if (select.value) state.settings.expertPresetByProvider[provider.id] = select.value;
+      row.append(createPresetSelect(state.settings.expertPresetByProvider[provider.id], `${provider.label} 专家预设`, async (presetId) => {
+        if (presetId) state.settings.expertPresetByProvider[provider.id] = presetId;
         else delete state.settings.expertPresetByProvider[provider.id];
         syncBlankExpertSessionAssignments();
         await saveState(state);
-      });
-      row.append(select);
+      }));
     }
 
     if (provider.enabled && checkbox.checked) {
@@ -1941,6 +1967,7 @@ function renderExpertPresets(): void {
       state.expertPresets = state.expertPresets.filter((item) => item.id !== preset.id);
       for (const provider of PROVIDERS) {
         if (state.settings.expertPresetByProvider[provider.id] === preset.id) delete state.settings.expertPresetByProvider[provider.id];
+        if (state.settings.qaPresetByProvider[provider.id] === preset.id) delete state.settings.qaPresetByProvider[provider.id];
       }
       syncBlankExpertSessionAssignments();
       await saveState(state);

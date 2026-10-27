@@ -49,6 +49,7 @@ export interface ProviderCapabilities {
 export interface AppSettings {
   replyAcceleration?: boolean;
   qaProviders: ProviderId[];
+  qaPresetByProvider: Partial<Record<ProviderId, string>>;
   roundtableProviders: ProviderId[];
   werewolfProviders: ProviderId[];
   clocktowerProviders: ProviderId[];
@@ -102,6 +103,8 @@ export interface ConversationSession {
   rounds: number;
   execution?: SequentialExecutionState;
   pendingOperations?: Record<string, ProviderOperationState>;
+  qaPresetAssignments?: Partial<Record<ProviderId, ExpertAssignmentSnapshot>>;
+  qaInitializedProviders?: ProviderId[];
   expertAssignments?: Partial<Record<ProviderId, ExpertAssignmentSnapshot>>;
   expertInitializedProviders?: ProviderId[];
 }
