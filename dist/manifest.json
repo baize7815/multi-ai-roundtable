@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Multi AI Roundtable",
-  "version": "0.2.0",
+  "version": "0.2.4",
   "description": "Connect 10 logged-in AI web apps for parallel chat, AI roundtables, experts and original social deduction games.",
   "permissions": [
     "sidePanel",
     "tabs",
     "tabGroups",
     "storage",
+    "unlimitedStorage",
     "scripting",
     "alarms"
   ],
@@ -21,7 +22,8 @@
     "https://gemini.google.com/*",
     "https://grok.com/*",
     "https://wenxin.baidu.com/*",
-    "https://agent.minimax.cn/*"
+    "https://agent.minimax.cn/*",
+    "https://*.qiniucs.com/*"
   ],
   "background": {
     "service_worker": "background.js",

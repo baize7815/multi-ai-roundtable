@@ -20,5 +20,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:werewolf
-      - run: npm run test:fog-council
+      - run: npm run test:clocktower
       - run: npm run build

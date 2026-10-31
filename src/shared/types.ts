@@ -1,11 +1,11 @@
 import type { WerewolfGameSession, WerewolfSetupSettings } from '../game/werewolf/types';
-import type { FogCouncilGameSession, FogCouncilSetupSettings } from '../game/fog-council/session';
+import type { ClocktowerGameSession, ClocktowerSetupSettings } from '../game/clocktower/types';
 
 export const PROVIDER_IDS = ['doubao', 'deepseek', 'kimi', 'qwen', 'zhipu', 'gpt', 'gemini', 'grok', 'wenxin', 'minimax'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export type ConversationMode = 'qa' | 'roundtable' | 'expert';
-export type Mode = ConversationMode | 'werewolf' | 'fog_council';
+export type Mode = ConversationMode | 'werewolf' | 'clocktower';
 export type SequentialMode = 'roundtable' | 'expert';
 
 export interface AttachmentPayload {
@@ -26,6 +26,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   provider?: ProviderId;
+  kind?: 'summary';
   text: string;
   attachments?: Pick<AttachmentPayload, 'id' | 'name' | 'type' | 'size' | 'kind'>[];
   createdAt: number;
@@ -46,12 +47,16 @@ export interface ProviderCapabilities {
   cancel: boolean;
 }
 
+export type ReplyAccelerationMode = 'background_pump' | 'smart_wake' | 'foreground_rotate';
+
 export interface AppSettings {
-  replyAcceleration?: boolean;
+  replyAcceleration?: boolean; // compatibility with older saved settings
+  replyAccelerationMode?: ReplyAccelerationMode;
   qaProviders: ProviderId[];
+  qaPresetByProvider: Partial<Record<ProviderId, string>>;
   roundtableProviders: ProviderId[];
   werewolfProviders: ProviderId[];
-  fogCouncilProviders: ProviderId[];
+  clocktowerProviders: ProviderId[];
   expertPresetByProvider: Partial<Record<ProviderId, string>>;
 }
 
@@ -75,6 +80,7 @@ export interface ProviderOperationState {
   provider: ProviderId;
   mode: ConversationMode;
   payload: ComposerPayload;
+  qaPresetKey?: string;
   startedAt: number;
   phase?: 'preparing' | 'active';
 }
@@ -102,6 +108,8 @@ export interface ConversationSession {
   rounds: number;
   execution?: SequentialExecutionState;
   pendingOperations?: Record<string, ProviderOperationState>;
+  qaPresetAssignments?: Partial<Record<ProviderId, ExpertAssignmentSnapshot>>;
+  qaInitializedProviders?: ProviderId[];
   expertAssignments?: Partial<Record<ProviderId, ExpertAssignmentSnapshot>>;
   expertInitializedProviders?: ProviderId[];
 }
@@ -115,9 +123,9 @@ export interface PersistedState {
   werewolfGames: WerewolfGameSession[];
   activeWerewolfGameId?: string;
   werewolfSetup: WerewolfSetupSettings;
-  fogCouncilGames: FogCouncilGameSession[];
-  activeFogCouncilGameId?: string;
-  fogCouncilSetup: FogCouncilSetupSettings;
+  clocktowerGames: ClocktowerGameSession[];
+  activeClocktowerGameId?: string;
+  clocktowerSetup: ClocktowerSetupSettings;
 }
 
 export type ProviderEventType =

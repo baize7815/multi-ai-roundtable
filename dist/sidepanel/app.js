@@ -4207,19 +4207,29 @@ var PROVIDERS = [
 var providerById = Object.fromEntries(PROVIDERS.map((provider) => [provider.id, provider]));
 
 // src/shared/storage.ts
+var BUILTIN_EXPERT_PRESETS = [
+  { id: "builtin-expert-1", name: "\u4EA7\u54C1\u603B\u76D1", prompt: "\u4ECE\u7528\u6237\u95EE\u9898\u3001\u4EF7\u503C\u4E3B\u5F20\u3001\u9700\u6C42\u4F18\u5148\u7EA7\u3001\u53EF\u9A8C\u8BC1\u7684 MVP\u3001\u5546\u4E1A\u95ED\u73AF\u548C\u673A\u4F1A\u6210\u672C\u51FA\u53D1\uFF0C\u660E\u786E\u51B3\u7B56\u5EFA\u8BAE\u4E0E\u653E\u5F03\u9879\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-2", name: "\u7CFB\u7EDF\u67B6\u6784\u5E08", prompt: "\u4ECE\u7CFB\u7EDF\u8FB9\u754C\u3001\u6280\u672F\u9009\u578B\u3001\u6570\u636E\u6D41\u3001\u6027\u80FD\u4E0E\u53EF\u9760\u6027\u3001\u6269\u5C55\u6210\u672C\u3001\u6545\u969C\u6062\u590D\u4E0E\u5B89\u5168\u6027\u8BC4\u4F30\u65B9\u6848\uFF0C\u63D0\u51FA\u53EF\u843D\u5730\u7684\u67B6\u6784\u53D6\u820D\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-3", name: "\u9B54\u9B3C\u4EE3\u8A00\u4EBA", prompt: "\u4E3B\u52A8\u5BFB\u627E\u903B\u8F91\u7F3A\u9677\u3001\u9690\u85CF\u524D\u63D0\u3001\u53CD\u4F8B\u3001\u5931\u8D25\u8DEF\u5F84\u53CA\u5408\u89C4\u4E0E\u5B89\u5168\u98CE\u9669\uFF1B\u5148\u9648\u8FF0\u53CD\u65B9\u6700\u5F3A\u8BBA\u8BC1\uFF0C\u518D\u63D0\u51FA\u53EF\u9A8C\u8BC1\u7684\u4FEE\u6B63\u529E\u6CD5\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-4", name: "\u589E\u957F\u8FD0\u8425\u4E13\u5BB6", prompt: "\u5206\u6790\u76EE\u6807\u4EBA\u7FA4\u3001\u51B7\u542F\u52A8\u6E20\u9053\u3001\u8F6C\u5316\u6F0F\u6597\u3001\u7559\u5B58\u673A\u5236\u3001\u589E\u957F\u5B9E\u9A8C\u4E0E\u53EF\u8861\u91CF\u6307\u6807\uFF0C\u6CE8\u610F\u83B7\u5BA2\u6210\u672C\u548C\u589E\u957F\u8D28\u91CF\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-5", name: "\u7528\u6237\u4F53\u9A8C\u8BBE\u8BA1\u5E08", prompt: "\u5173\u6CE8\u7528\u6237\u76EE\u6807\u3001\u4EFB\u52A1\u8DEF\u5F84\u3001\u4EA4\u4E92\u53CD\u9988\u3001\u8BA4\u77E5\u8D1F\u62C5\u3001\u4FE1\u606F\u5C42\u7EA7\u3001\u53EF\u8BBF\u95EE\u6027\u4E0E\u89C6\u89C9\u4E00\u81F4\u6027\uFF0C\u63D0\u51FA\u53EF\u6D4B\u8BD5\u7684\u539F\u578B\u6539\u8FDB\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-6", name: "\u7B2C\u4E00\u6027\u539F\u7406\u601D\u8003\u8005", prompt: "\u660E\u786E\u95EE\u9898\u5B9A\u4E49\uFF0C\u62C6\u9664\u672A\u7ECF\u8BC1\u660E\u7684\u5047\u8BBE\uFF0C\u4ECE\u57FA\u672C\u7EA6\u675F\u4E0E\u53EF\u9A8C\u8BC1\u4E8B\u5B9E\u63A8\u5BFC\u89E3\u6CD5\uFF0C\u5E76\u533A\u5206\u4E8B\u5B9E\u3001\u63A8\u8BBA\u4E0E\u731C\u60F3\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 }
+];
 var STORAGE_KEY = "multiAiRoundtableStateV2";
 var LEGACY_STORAGE_KEY = "multiAiRoundtableStateV1";
 var DEFAULT_STATE = {
   activeMode: "qa",
   settings: {
     replyAcceleration: true,
+    replyAccelerationMode: "background_pump",
     qaProviders: ["doubao", "deepseek"],
+    qaPresetByProvider: {},
     roundtableProviders: ["doubao", "deepseek"],
     werewolfProviders: ["doubao", "deepseek", "kimi", "qwen", "zhipu", "gpt", "gemini", "grok"],
-    fogCouncilProviders: ["doubao", "deepseek", "kimi", "qwen", "zhipu", "gpt", "gemini", "grok"],
+    clocktowerProviders: ["doubao", "deepseek", "kimi", "qwen", "zhipu", "gpt", "gemini", "grok"],
     expertPresetByProvider: {}
   },
-  expertPresets: [],
+  expertPresets: structuredClone(BUILTIN_EXPERT_PRESETS),
   conversations: [],
   activeConversationIds: {},
   werewolfGames: [],
@@ -4230,12 +4240,14 @@ var DEFAULT_STATE = {
     humanSeat: 0,
     presetId: "werewolf-v1-6"
   },
-  fogCouncilGames: [],
-  fogCouncilSetup: {
+  clocktowerGames: [],
+  clocktowerSetup: {
     playerCount: 6,
     providerIds: ["doubao", "deepseek", "kimi", "qwen", "zhipu", "gpt"],
     includeHuman: false,
-    humanSeat: 0
+    humanSeat: 0,
+    scriptId: "trouble-brewing",
+    setupMode: "curated"
   }
 };
 function createConversationSession(mode) {
@@ -4276,19 +4288,21 @@ function migrateLegacy(legacy) {
     activeMode: legacy.activeMode ?? "qa",
     settings: {
       replyAcceleration: true,
+      replyAccelerationMode: "background_pump",
       qaProviders: legacy.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
+      qaPresetByProvider: {},
       roundtableProviders: legacy.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: DEFAULT_STATE.settings.werewolfProviders,
-      fogCouncilProviders: DEFAULT_STATE.settings.fogCouncilProviders,
+      clocktowerProviders: DEFAULT_STATE.settings.clocktowerProviders,
       expertPresetByProvider: {}
     },
-    expertPresets: [],
+    expertPresets: structuredClone(BUILTIN_EXPERT_PRESETS),
     conversations: [qa, roundtable, expert],
     activeConversationIds: { qa: qa.id, roundtable: roundtable.id, expert: expert.id },
     werewolfGames: [],
     werewolfSetup: structuredClone(DEFAULT_STATE.werewolfSetup),
-    fogCouncilGames: [],
-    fogCouncilSetup: structuredClone(DEFAULT_STATE.fogCouncilSetup)
+    clocktowerGames: [],
+    clocktowerSetup: structuredClone(DEFAULT_STATE.clocktowerSetup)
   };
 }
 async function loadState() {
@@ -4298,19 +4312,20 @@ async function loadState() {
     const legacy = result[LEGACY_STORAGE_KEY];
     return legacy ? migrateLegacy(legacy) : structuredClone(DEFAULT_STATE);
   }
-  const safeStored = { ...stored };
-  for (const key of ["clocktowerGames", "activeClocktowerGameId", "clocktowerSetup"]) delete safeStored[key];
-  const activeMode = ["qa", "roundtable", "expert", "werewolf", "fog_council"].includes(String(stored.activeMode)) ? stored.activeMode : "qa";
   return {
     ...DEFAULT_STATE,
-    ...safeStored,
-    activeMode,
+    ...stored,
+    // The public 0.2.0 build used a different experimental game mode ID.
+    // Do not let its saved tab selection break the restored local game UI.
+    activeMode: stored.activeMode === "fog_council" ? "clocktower" : stored.activeMode ?? "qa",
     settings: {
       replyAcceleration: stored.settings?.replyAcceleration ?? true,
+      replyAccelerationMode: stored.settings?.replyAccelerationMode ?? "background_pump",
       qaProviders: stored.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
+      qaPresetByProvider: stored.settings?.qaPresetByProvider ?? {},
       roundtableProviders: stored.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
       werewolfProviders: stored.settings?.werewolfProviders ?? DEFAULT_STATE.settings.werewolfProviders,
-      fogCouncilProviders: stored.settings?.fogCouncilProviders ?? DEFAULT_STATE.settings.fogCouncilProviders,
+      clocktowerProviders: stored.settings?.clocktowerProviders ?? DEFAULT_STATE.settings.clocktowerProviders,
       expertPresetByProvider: stored.settings?.expertPresetByProvider ?? {}
     },
     expertPresets: stored.expertPresets ?? [],
@@ -4319,9 +4334,9 @@ async function loadState() {
     werewolfGames: stored.werewolfGames ?? [],
     activeWerewolfGameId: stored.activeWerewolfGameId,
     werewolfSetup: stored.werewolfSetup ?? structuredClone(DEFAULT_STATE.werewolfSetup),
-    fogCouncilGames: stored.fogCouncilGames ?? [],
-    activeFogCouncilGameId: stored.activeFogCouncilGameId,
-    fogCouncilSetup: stored.fogCouncilSetup ?? structuredClone(DEFAULT_STATE.fogCouncilSetup)
+    clocktowerGames: stored.clocktowerGames ?? [],
+    activeClocktowerGameId: stored.activeClocktowerGameId,
+    clocktowerSetup: stored.clocktowerSetup ?? structuredClone(DEFAULT_STATE.clocktowerSetup)
   };
 }
 
@@ -4381,6 +4396,143 @@ function mergeExpertPresets(existing, incoming, now, createId) {
     updated += 1;
   }
   return { presets, added, updated, unchanged };
+}
+function replaceExpertPresets(existing, incoming, now, createId) {
+  const result = mergeExpertPresets(existing, incoming, now, createId);
+  const names = new Set(incoming.map((item) => item.name.trim().toLocaleLowerCase()));
+  return {
+    ...result,
+    // Preserve IDs for matching names so configured providers keep their preset bindings.
+    presets: result.presets.filter((preset) => names.has(preset.name.trim().toLocaleLowerCase()))
+  };
+}
+
+// src/sidepanel/qiniu-presets.ts
+var CLOUD_PRESET_OBJECT_KEY = "multi-ai-roundtable/experts.json";
+var CLOUD_PRESET_MAX_BYTES = 5 * 1024 * 1024;
+var CLOUD_CONFIG_STORAGE_KEY = "multiAiRoundtableQiniuConfigV1";
+var CLOUD_SECRET_SESSION_KEY = "multiAiRoundtableQiniuSecretV1";
+var encoder = new TextEncoder();
+var emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+function parseQiniuEndpoint(input) {
+  let url;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    throw new Error("\u4E03\u725B S3 \u5730\u5740\u65E0\u6548\u3002");
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.port || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("\u8BF7\u8F93\u5165\u5B8C\u6574\u7684 HTTPS S3 \u5B58\u50A8\u6876\u5730\u5740\uFF0C\u4E0D\u8981\u6DFB\u52A0\u8DEF\u5F84\u3001\u7AEF\u53E3\u6216\u53C2\u6570\u3002");
+  }
+  const match = /^([a-z0-9][a-z0-9-]*)\.s3\.([a-z0-9-]+)\.qiniucs\.com$/i.exec(url.hostname);
+  if (!match) throw new Error("\u5730\u5740\u5E94\u4E3A https://\u5B58\u50A8\u6876.s3.\u533A\u57DF.qiniucs.com");
+  return { origin: url.origin, host: url.host, region: match[2] };
+}
+function hex(bytes) {
+  return Array.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+async function sha256(bytes) {
+  return hex(await crypto.subtle.digest("SHA-256", bytes));
+}
+async function hmac(key, content) {
+  const material = typeof key === "string" ? encoder.encode(key) : key;
+  const imported = await crypto.subtle.importKey("raw", material, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", imported, encoder.encode(content)));
+}
+async function signedRequest(method, config, body) {
+  const { origin, host, region } = parseQiniuEndpoint(config.endpoint);
+  const accessKey = config.accessKey.trim();
+  const secretKey = config.secretKey.trim();
+  if (!accessKey || !secretKey) throw new Error("\u8BF7\u586B\u5199\u4E03\u725B\u4E91 AccessKey \u548C SecretKey\u3002");
+  if (!/^[A-Za-z0-9_-]+$/.test(accessKey)) throw new Error("AccessKey \u683C\u5F0F\u65E0\u6548\u3002");
+  const uri = "/" + CLOUD_PRESET_OBJECT_KEY.split("/").map(encodeURIComponent).join("/");
+  const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]|\.\d{3}/g, "");
+  const day = stamp.slice(0, 8);
+  const hash = method === "PUT" ? await sha256(body ?? new Uint8Array()) : emptyHash;
+  const canonicalHeaders = method === "PUT" ? `content-type:application/json
+host:${host}
+x-amz-content-sha256:${hash}
+x-amz-date:${stamp}
+` : `host:${host}
+x-amz-content-sha256:${hash}
+x-amz-date:${stamp}
+`;
+  const signedHeaders = method === "PUT" ? "content-type;host;x-amz-content-sha256;x-amz-date" : "host;x-amz-content-sha256;x-amz-date";
+  const canonicalRequest = [method, uri, "", canonicalHeaders, signedHeaders, hash].join("\n");
+  const scope = `${day}/${region}/s3/aws4_request`;
+  const stringToSign = ["AWS4-HMAC-SHA256", stamp, scope, await sha256(encoder.encode(canonicalRequest))].join("\n");
+  let signingKey = await hmac("AWS4" + secretKey, day);
+  signingKey = await hmac(signingKey, region);
+  signingKey = await hmac(signingKey, "s3");
+  signingKey = await hmac(signingKey, "aws4_request");
+  const signature = hex(await hmac(signingKey, stringToSign));
+  const headers = {
+    "x-amz-content-sha256": hash,
+    "x-amz-date": stamp,
+    Authorization: `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope},SignedHeaders=${signedHeaders},Signature=${signature}`
+  };
+  if (method === "PUT") headers["Content-Type"] = "application/json";
+  let response;
+  try {
+    response = await fetch(origin + uri, {
+      method,
+      headers,
+      ...method === "PUT" ? { body } : {},
+      credentials: "omit",
+      redirect: "error",
+      cache: "no-store"
+    });
+  } catch {
+    throw new Error("\u65E0\u6CD5\u8FDE\u63A5\u4E03\u725B S3\u3002\u8BF7\u68C0\u67E5\u5B58\u50A8\u6876 HTTPS \u5730\u5740\u3001\u7F51\u7EDC\u548C\u6269\u5C55\u6743\u9650\u3002");
+  }
+  if (!response.ok) {
+    const raw = (await response.text().catch(() => "")).slice(0, 4096);
+    const code = /<Code>([A-Za-z0-9_-]+)<\/Code>/.exec(raw)?.[1];
+    throw new Error(`\u4E03\u725B\u4E91 HTTP ${response.status}${code ? " \xB7 " + code : ""}\uFF0C\u8BF7\u6838\u5BF9\u533A\u57DF\u3001\u5BC6\u94A5\u548C\u5B58\u50A8\u7A7A\u95F4\u6743\u9650\u3002`);
+  }
+  return response;
+}
+async function uploadExpertPresetsJson(config, text2) {
+  const bytes = encoder.encode(text2);
+  if (!bytes.length || bytes.length > CLOUD_PRESET_MAX_BYTES) throw new Error("\u9884\u8BBE JSON \u4E3A\u7A7A\u6216\u8D85\u8FC7 5 MiB\u3002");
+  await signedRequest("PUT", config, bytes);
+}
+async function downloadExpertPresetsJson(config) {
+  const response = await signedRequest("GET", config);
+  const declaredLength = response.headers.get("Content-Length");
+  if (declaredLength !== null && Number(declaredLength) > CLOUD_PRESET_MAX_BYTES) {
+    await response.body?.cancel();
+    throw new Error("\u4E91\u7AEF\u9884\u8BBE JSON \u8D85\u8FC7 5 MiB\uFF0C\u5DF2\u62D2\u7EDD\u4E0B\u8F7D\u3002");
+  }
+  if (!response.body) throw new Error("\u65E0\u6CD5\u8BFB\u53D6\u4E91\u7AEF\u54CD\u5E94\u6B63\u6587\u3002");
+  const reader = response.body.getReader();
+  const parts = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > CLOUD_PRESET_MAX_BYTES) throw new Error("\u4E91\u7AEF\u9884\u8BBE JSON \u8D85\u8FC7 5 MiB\uFF0C\u5DF2\u505C\u6B62\u4E0B\u8F7D\u3002");
+      parts.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => void 0);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("\u4E91\u7AEF\u9884\u8BBE JSON \u4E0D\u662F\u6709\u6548\u7684 UTF-8 \u6587\u672C\u3002");
+  }
 }
 
 // src/game/werewolf/rules.ts
@@ -4442,22 +4594,54 @@ function humanVisibleEvents(game) {
   return visibleEvents(game, human?.seat, game.status === "ended");
 }
 
-// src/game/fog-council/roles.ts
-var COUNCIL_ROLES = [
-  { id: "calibrator", name: "\u5B9A\u6807\u5E08", faction: "clarity", description: "\u6BCF\u8F6E\u6536\u5230\u552F\u4E00\u7684\u6B63\u786E\u9891\u9053\u4FE1\u53F7\u3002" },
-  { id: "dual-track", name: "\u53CC\u8F68\u5E08", faction: "clarity", description: "\u6BCF\u8F6E\u6536\u5230\u542B\u6B63\u786E\u9891\u9053\u7684\u4E24\u4E2A\u5019\u9009\u3002" },
-  { id: "filter", name: "\u6392\u8BEF\u5E08", faction: "clarity", description: "\u6BCF\u8F6E\u6536\u5230\u4E00\u4E2A\u786E\u5B9A\u9519\u8BEF\u7684\u9891\u9053\u3002" },
-  { id: "wave-scout", name: "\u5DE1\u6CE2\u5E08", faction: "clarity", description: "\u6BCF\u8F6E\u6536\u5230\u4E00\u6761\u7EA6 75% \u53EF\u9760\u7684\u5355\u9891\u9053\u89C2\u6D4B\u3002" },
-  { id: "coordinator", name: "\u534F\u8C03\u5E08", faction: "clarity", description: "\u5947\u6570\u8F6E\u83B7\u5F97\u53CC\u5019\u9009\uFF0C\u5076\u6570\u8F6E\u83B7\u5F97\u7CBE\u786E\u4FE1\u53F7\u3002" },
-  { id: "line-keeper", name: "\u5B88\u7EBF\u5458", faction: "clarity", description: "\u6BCF\u8F6E\u83B7\u77E5\u6B63\u786E\u9891\u9053\u5C5E\u4E8E B \u8FD8\u662F A/C \u7EC4\u5408\u3002" },
-  { id: "fog-weaver", name: "\u96FE\u7EC7\u8005", faction: "mist", description: "\u77E5\u6653\u6B63\u786E\u9891\u9053\uFF0C\u5C1D\u8BD5\u5728\u516C\u5F00\u8BA8\u8BBA\u4E2D\u8BEF\u5BFC\u8BAE\u4F1A\u3002" },
-  { id: "noise-caster", name: "\u566A\u8BAF\u5E08", faction: "mist", description: "\u77E5\u6653\u6B63\u786E\u9891\u9053\uFF0C\u5C1D\u8BD5\u5728\u516C\u5F00\u8BA8\u8BBA\u4E2D\u8BEF\u5BFC\u8BAE\u4F1A\u3002" }
+// src/game/clocktower/scripts.ts
+var role = (id2, name, type, publicDescription, timing, firstNightOrder, otherNightOrder) => ({
+  id: id2,
+  name,
+  type,
+  alignment: type === "minion" || type === "demon" ? "evil" : "good",
+  publicDescription,
+  timing,
+  firstNightOrder,
+  otherNightOrder
+});
+var TROUBLE_BREWING_ROLES = [
+  role("washerwoman", "\u5BFB\u7EB9\u8005", "townsfolk", "\u9996\u591C\u83B7\u77E5\u4E24\u540D\u73A9\u5BB6\u4E2D\u6709\u4E00\u4EBA\u662F\u67D0\u4E2A\u7279\u5B9A\u9547\u6C11\u3002", "\u9996\u591C", 50),
+  role("librarian", "\u5377\u5B97\u5E08", "townsfolk", "\u9996\u591C\u83B7\u77E5\u4E24\u540D\u73A9\u5BB6\u4E2D\u6709\u4E00\u4EBA\u662F\u67D0\u4E2A\u5916\u6765\u8005\uFF1B\u82E5\u6CA1\u6709\u5916\u6765\u8005\u53EF\u83B7\u77E5\u201C0\u201D\u3002", "\u9996\u591C", 60),
+  role("investigator", "\u5F71\u8FF9\u4FA6\u5BDF\u5B98", "townsfolk", "\u9996\u591C\u83B7\u77E5\u4E24\u540D\u73A9\u5BB6\u4E2D\u6709\u4E00\u4EBA\u662F\u67D0\u4E2A\u722A\u7259\u3002", "\u9996\u591C", 70),
+  role("chef", "\u90BB\u57DF\u89C2\u6D4B\u5458", "townsfolk", "\u9996\u591C\u83B7\u77E5\u76F8\u90BB\u90AA\u6076\u73A9\u5BB6\u5BF9\u6570\u3002", "\u9996\u591C", 80),
+  role("empath", "\u8BC6\u5FC3\u8005", "townsfolk", "\u6BCF\u591C\u83B7\u77E5\u81EA\u5DF1\u4E24\u4FA7\u6700\u8FD1\u7684\u5B58\u6D3B\u73A9\u5BB6\u4E2D\u6709\u51E0\u540D\u90AA\u6076\u3002", "\u6BCF\u591C", 90, 90),
+  role("fortune_teller", "\u661F\u8F68\u9884\u8A00\u8005", "townsfolk", "\u6BCF\u591C\u9009\u62E9\u4E24\u540D\u73A9\u5BB6\uFF0C\u83B7\u77E5\u5176\u4E2D\u662F\u5426\u81F3\u5C11\u4E00\u4EBA\u6CE8\u518C\u4E3A\u6076\u9B54\uFF1B\u53E6\u6709\u4E00\u540D\u5584\u826F\u7EA2\u9CB1\u9C7C\u4E5F\u4F1A\u5448\u9633\u6027\u3002", "\u6BCF\u591C", 100, 100),
+  role("undertaker", "\u56DE\u6EAF\u5E08", "townsfolk", "\u6BCF\u4E2A\u975E\u9996\u591C\u83B7\u77E5\u767D\u5929\u88AB\u5904\u51B3\u5E76\u6B7B\u4EA1\u73A9\u5BB6\u7684\u89D2\u8272\u3002", "\u6BCF\u591C*", void 0, 110),
+  role("monk", "\u5E87\u62A4\u8005", "townsfolk", "\u6BCF\u4E2A\u975E\u9996\u591C\u9009\u62E9\u4E00\u540D\u975E\u81EA\u5DF1\u7684\u73A9\u5BB6\uFF0C\u4F7F\u5176\u5F53\u591C\u514D\u53D7\u6076\u9B54\u80FD\u529B\u6740\u6B7B\u3002", "\u6BCF\u591C*", void 0, 30),
+  role("ravenkeeper", "\u66AE\u9E26\u4FE1\u4F7F", "townsfolk", "\u82E5\u5728\u591C\u95F4\u6B7B\u4EA1\uFF0C\u9009\u62E9\u4E00\u540D\u73A9\u5BB6\u5E76\u83B7\u77E5\u5176\u89D2\u8272\u3002", "\u591C\u95F4\u6B7B\u4EA1\u89E6\u53D1"),
+  role("virgin", "\u65E0\u7455\u8BC1\u4EBA", "townsfolk", "\u7B2C\u4E00\u6B21\u88AB\u63D0\u540D\u65F6\uFF0C\u82E5\u63D0\u540D\u8005\u6CE8\u518C\u4E3A\u9547\u6C11\uFF0C\u5219\u63D0\u540D\u8005\u7ACB\u5373\u88AB\u5904\u51B3\u3002", "\u9996\u6B21\u88AB\u63D0\u540D"),
+  role("slayer", "\u7834\u5492\u730E\u624B", "townsfolk", "\u4E00\u5C40\u4E00\u6B21\uFF0C\u767D\u5929\u516C\u5F00\u9009\u62E9\u4E00\u540D\u73A9\u5BB6\uFF1B\u82E5\u5176\u6CE8\u518C\u4E3A\u6076\u9B54\uFF0C\u5219\u5176\u6B7B\u4EA1\u3002", "\u767D\u5929\u4E00\u6B21"),
+  role("soldier", "\u94C1\u7532\u536B\u58EB", "townsfolk", "\u4E0D\u80FD\u88AB\u6076\u9B54\u80FD\u529B\u6740\u6B7B\u3002", "\u88AB\u52A8"),
+  role("mayor", "\u8BAE\u4F1A\u957F", "townsfolk", "\u4EC5\u4E09\u4EBA\u5B58\u6D3B\u4E14\u5F53\u5929\u65E0\u4EBA\u88AB\u5904\u51B3\u65F6\u5584\u826F\u83B7\u80DC\uFF1B\u591C\u95F4\u88AB\u6076\u9B54\u653B\u51FB\u65F6\uFF0C\u4E3B\u6301\u4EBA\u53EF\u8BA9\u5176\u4ED6\u73A9\u5BB6\u4EE3\u6B7B\u3002", "\u88AB\u52A8/\u80DC\u8D1F"),
+  role("butler", "\u4F8D\u4ECE", "outsider", "\u6BCF\u591C\u9009\u62E9\u4E00\u540D\u4E3B\u4EBA\uFF1B\u6B21\u65E5\u53EA\u6709\u4E3B\u4EBA\u6295\u7968\u65F6\u81EA\u5DF1\u624D\u53EF\u6295\u7968\u3002", "\u6BCF\u591C", 120, 120),
+  role("drunk", "\u8FF7\u9189\u8005", "outsider", "\u4F60\u4E0D\u77E5\u9053\u81EA\u5DF1\u662F\u8FF7\u9189\u8005\uFF0C\u800C\u8BA4\u4E3A\u81EA\u5DF1\u662F\u67D0\u4E2A\u9547\u6C11\uFF1B\u4F60\u6CA1\u6709\u771F\u5B9E\u80FD\u529B\u3002", "\u6301\u7EED"),
+  role("recluse", "\u79BB\u7FA4\u8005", "outsider", "\u4F60\u53EF\u80FD\u6CE8\u518C\u4E3A\u90AA\u6076\u3001\u722A\u7259\u6216\u6076\u9B54\uFF0C\u5373\u4F7F\u6B7B\u4EA1\u540E\u4E5F\u53EF\u80FD\u5982\u6B64\u3002", "\u6301\u7EED"),
+  role("saint", "\u8A93\u7EA6\u5B88\u62A4\u8005", "outsider", "\u5982\u679C\u4F60\u56E0\u5904\u51B3\u800C\u6B7B\u4EA1\uFF0C\u4F60\u7684\u9635\u8425\u5931\u8D25\u3002", "\u88AB\u5904\u51B3"),
+  role("poisoner", "\u8680\u96FE\u5E08", "minion", "\u6BCF\u591C\u9009\u62E9\u4E00\u540D\u73A9\u5BB6\uFF0C\u4F7F\u5176\u672C\u591C\u4E0E\u6B21\u65E5\u4E2D\u6BD2\u3002", "\u6BCF\u591C", 10, 10),
+  role("spy", "\u6F5C\u5F71\u8005", "minion", "\u6BCF\u591C\u67E5\u770B\u9B54\u5178\uFF1B\u4F60\u53EF\u80FD\u6CE8\u518C\u4E3A\u5584\u826F\u3001\u9547\u6C11\u6216\u5916\u6765\u8005\u3002", "\u6BCF\u591C", 130, 130),
+  role("scarlet_woman", "\u8D64\u5F71\u7EE7\u627F\u8005", "minion", "\u6076\u9B54\u6B7B\u4EA1\u65F6\u82E5\u5F53\u65F6\u81F3\u5C11\u4E94\u4EBA\u5B58\u6D3B\uFF0C\u4F60\u6210\u4E3A\u65B0\u7684\u6076\u9B54\u3002", "\u6076\u9B54\u6B7B\u4EA1\u89E6\u53D1"),
+  role("baron", "\u591C\u5E55\u9886\u4E3B", "minion", "\u5F00\u5C40\u989D\u5916\u52A0\u5165\u4E24\u540D\u5916\u6765\u8005\u5E76\u51CF\u5C11\u4E24\u540D\u9547\u6C11\u3002", "\u5F00\u5C40"),
+  role("imp", "\u6697\u7130\u4E4B\u4E3B", "demon", "\u6BCF\u4E2A\u975E\u9996\u591C\u9009\u62E9\u4E00\u540D\u73A9\u5BB6\u6B7B\u4EA1\uFF1B\u82E5\u6740\u6B7B\u81EA\u5DF1\uFF0C\u5219\u4E00\u540D\u722A\u7259\u6210\u4E3A\u65B0\u7684\u6697\u7130\u4E4B\u4E3B\u3002", "\u6BCF\u591C*", void 0, 50)
 ];
-var COUNCIL_ROLE_BY_ID = Object.fromEntries(COUNCIL_ROLES.map((role) => [role.id, role]));
+var TROUBLE_BREWING_ROLE_IDS = TROUBLE_BREWING_ROLES.map((item) => item.id);
+var clocktowerRoleById = Object.fromEntries(TROUBLE_BREWING_ROLES.map((item) => [item.id, item]));
+var ROLE_IDS_BY_TYPE = {
+  townsfolk: TROUBLE_BREWING_ROLES.filter((item) => item.type === "townsfolk").map((item) => item.id),
+  outsider: TROUBLE_BREWING_ROLES.filter((item) => item.type === "outsider").map((item) => item.id),
+  minion: TROUBLE_BREWING_ROLES.filter((item) => item.type === "minion").map((item) => item.id),
+  demon: TROUBLE_BREWING_ROLES.filter((item) => item.type === "demon").map((item) => item.id)
+};
 
-// src/game/fog-council/core.ts
-function visibleCouncilEvents(game, viewerSeat) {
-  return game.events.filter((e) => e.visibility.type === "public" || e.visibility.type === "seat" && e.visibility.seat === viewerSeat).map((e) => structuredClone(e));
+// src/game/clocktower/core.ts
+function publiclyAlive(game, player) {
+  if (game.status === "ended") return player.alive;
+  return player.alive || game.pendingNightDeaths.includes(player.seat);
 }
 
 // src/sidepanel/controller.ts
@@ -4479,14 +4663,15 @@ var ICON_EXPORT = '<svg width="20" height="20" viewBox="0 0 48 48" fill="none" a
 var state = structuredClone(DEFAULT_STATE);
 var uiBaseline = structuredClone(DEFAULT_STATE);
 var draftAttachments = [];
-var interruptRequested = false;
+var liveStreamText = /* @__PURE__ */ new Map();
 var editingExpertId = null;
+var clocktowerSelectedTargets = [];
 var providerAvailability = /* @__PURE__ */ new Map();
 async function saveState(nextState) {
   const baseline = uiBaseline;
   const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
   const settings = {};
-  for (const key of ["replyAcceleration", "qaProviders", "roundtableProviders", "werewolfProviders", "fogCouncilProviders", "expertPresetByProvider"]) {
+  for (const key of ["replyAccelerationMode", "qaProviders", "qaPresetByProvider", "roundtableProviders", "werewolfProviders", "clocktowerProviders", "expertPresetByProvider"]) {
     if (changed(nextState.settings[key], baseline.settings[key])) Object.assign(settings, { [key]: nextState.settings[key] });
   }
   const sessions = nextState.conversations.flatMap((session) => {
@@ -4498,7 +4683,8 @@ async function saveState(nextState) {
       addedMessages,
       ...session.rounds !== previous.rounds ? { rounds: session.rounds } : {},
       ...session.title !== previous.title ? { title: session.title } : {},
-      ...changed(session.expertAssignments, previous.expertAssignments) ? { expertAssignments: session.expertAssignments } : {}
+      ...changed(session.expertAssignments, previous.expertAssignments) ? { expertAssignments: session.expertAssignments } : {},
+      ...changed(session.qaPresetAssignments, previous.qaPresetAssignments) ? { qaPresetAssignments: session.qaPresetAssignments } : {}
     };
     return addedMessages.length || Object.keys(update).length > 2 ? [update] : [];
   });
@@ -4525,7 +4711,10 @@ function isSequentialMode(mode) {
   return mode === "roundtable" || mode === "expert";
 }
 function isConversationMode(mode) {
-  return mode !== "werewolf" && mode !== "fog_council";
+  return mode !== "werewolf" && mode !== "clocktower";
+}
+function isActiveConversation(session) {
+  return isConversationMode(state.activeMode) && state.activeConversationIds[state.activeMode] === session.id;
 }
 function modeLabel(mode) {
   return mode === "qa" ? "AI \u5BF9\u8BDD" : mode === "roundtable" ? "AI \u5706\u684C" : mode === "expert" ? "\u4E13\u5BB6\u56E2" : mode === "werewolf" ? "\u72FC\u4EBA\u6740" : "\u8FF7\u96FE\u8BAE\u4F1A";
@@ -4537,14 +4726,17 @@ function providersForMode(mode) {
 function sessionById(sessionId) {
   return state.conversations.find((session) => session.id === sessionId);
 }
-function captureExpertAssignments() {
+function capturePresetAssignments(presetByProvider) {
   const result = {};
   for (const provider of PROVIDERS) {
-    const presetId = state.settings.expertPresetByProvider[provider.id];
+    const presetId = presetByProvider[provider.id];
     const preset = presetId ? state.expertPresets.find((item) => item.id === presetId) : void 0;
     if (preset) result[provider.id] = { presetId: preset.id, name: preset.name, prompt: preset.prompt };
   }
   return result;
+}
+function captureExpertAssignments() {
+  return capturePresetAssignments(state.settings.expertPresetByProvider);
 }
 function createSession(mode) {
   const session = createConversationSession(mode);
@@ -4571,8 +4763,8 @@ function activeSession() {
 function activeWerewolfGame() {
   return state.activeWerewolfGameId ? state.werewolfGames.find((game) => game.id === state.activeWerewolfGameId) : void 0;
 }
-function activeFogCouncilGame() {
-  return state.activeFogCouncilGameId ? state.fogCouncilGames.find((game) => game.id === state.activeFogCouncilGameId) : void 0;
+function activeClocktowerGame() {
+  return state.activeClocktowerGameId ? state.clocktowerGames.find((game) => game.id === state.activeClocktowerGameId) : void 0;
 }
 function deriveTitle(payload) {
   const text2 = payload.text.replace(/\s+/g, " ").trim();
@@ -4741,6 +4933,17 @@ async function submitWerewolfHumanAction(submission) {
     showComposerError(error instanceof Error ? error.message : String(error));
   }
 }
+async function submitClocktowerHumanAction(submission) {
+  const game = activeClocktowerGame();
+  if (!game?.pendingHumanAction) return;
+  try {
+    await runtimeMessage({ type: "SUBMIT_CLOCKTOWER_HUMAN_ACTION", gameId: game.id, submission });
+    clocktowerSelectedTargets = [];
+    clearComposer();
+  } catch (error) {
+    showComposerError(error instanceof Error ? error.message : String(error));
+  }
+}
 function renderHumanActionPanel(game, pending, dashboard) {
   if (humanTextTurn(pending)) return;
   const panel = document.createElement("div");
@@ -4838,9 +5041,9 @@ function renderWerewolfGame(game) {
     }
     const name = document.createElement("strong");
     name.textContent = `${player.seat}\u53F7 \xB7 ${player.controller === "human" ? "\u4F60" : providerLabel(player.providerId)}`;
-    const role = document.createElement("span");
-    role.textContent = game.status === "ended" || player.controller === "human" ? ROLE_LABELS[player.role] : player.lifeState === "dead" ? "\u5DF2\u51FA\u5C40" : "\u8EAB\u4EFD\u9690\u85CF";
-    seat.append(name, role);
+    const role2 = document.createElement("span");
+    role2.textContent = game.status === "ended" || player.controller === "human" ? ROLE_LABELS[player.role] : player.lifeState === "dead" ? "\u5DF2\u51FA\u5C40" : "\u8EAB\u4EFD\u9690\u85CF";
+    seat.append(name, role2);
     seats.append(seat);
   }
   dashboard.append(seats);
@@ -4883,163 +5086,380 @@ function renderWerewolf() {
   if (!game) renderWerewolfSetup();
   else renderWerewolfGame(game);
 }
-function fogCouncilPhaseLabel(game) {
-  const labels = { setup: "\u5F85\u5F00\u59CB", briefing: "\u63A5\u6536\u7EBF\u7D22", debate: "\u516C\u5F00\u8FA9\u8BBA", ballot: "\u5BC6\u5C01\u8868\u51B3", ended: "\u6E38\u620F\u7ED3\u675F" };
-  return labels[game.phase];
+function clocktowerPhaseLabel(game) {
+  const labels = {
+    setup: "\u7B49\u5F85\u5F00\u59CB",
+    first_night: "\u7B2C\u4E00\u591C",
+    other_night: `\u7B2C ${game.day} \u591C`,
+    dawn: `\u7B2C ${game.day} \u5929\u5929\u4EAE`,
+    day_whispers: "\u79C1\u804A\u9636\u6BB5",
+    day_discussion: "\u516C\u5F00\u8BA8\u8BBA",
+    nomination: "\u63D0\u540D\u9636\u6BB5",
+    accusation: "\u6307\u63A7",
+    defense: "\u8FA9\u62A4",
+    vote: "\u516C\u5F00\u6295\u7968",
+    execution: "\u5904\u51B3\u7ED3\u7B97",
+    day_end: "\u767D\u5929\u7ED3\u675F",
+    ended: "\u6E38\u620F\u7ED3\u675F"
+  };
+  return labels[game.phase] ?? game.phase;
 }
-function fogCouncilStatusLabel(game) {
-  if (game.status === "paused") return "\u5DF2\u6682\u505C" + (game.errorMessage ? " \xB7 " + game.errorMessage : "");
-  if (game.status === "ended") return game.winner === "clarity" ? "\u6E05\u6670\u9635\u8425\u83B7\u80DC" : "\u8FF7\u96FE\u9635\u8425\u83B7\u80DC";
-  return fogCouncilPhaseLabel(game);
+function clocktowerStatusLabel(game) {
+  if (game.status === "ended") return game.winner ? `${game.winner === "good" ? "\u5584\u826F" : "\u90AA\u6076"}\u80DC\u5229` : "\u5DF2\u7ED3\u675F";
+  if (game.status === "paused") return "\u5DF2\u4E2D\u65AD";
+  if (game.status === "error") return "\u5F02\u5E38\u6682\u505C";
+  if (game.status === "waiting_human") return "\u7B49\u5F85\u4F60\u7684\u884C\u52A8";
+  return clocktowerPhaseLabel(game);
 }
-function fogCouncilVisibleEvents(game) {
-  return visibleCouncilEvents(game, game.humanSeat);
+function clocktowerHumanPlayer(game) {
+  return game.players.find((player) => player.controller === "human");
 }
-function fogCouncilHumanTextTurn(pending) {
-  return pending?.kind === "speech";
+function clocktowerVisibleEvents(game) {
+  const human = clocktowerHumanPlayer(game);
+  return game.events.filter((event) => {
+    if (event.visibility.type === "public") return true;
+    if (event.visibility.type === "post_game") return game.status === "ended";
+    if (event.visibility.type === "private") return Boolean(human && event.visibility.seats.includes(human.seat));
+    return false;
+  });
 }
-function renderFogCouncilScript() {
-  const body = el("fogCouncilScriptBody");
+function clocktowerHumanTextTurn(pending) {
+  if (!pending) return false;
+  return pending.expectedActions.length === 0 || pending.kind === "whisper";
+}
+function renderClocktowerScript() {
+  const body = el("clocktowerScriptBody");
   body.replaceChildren();
-  for (const role of COUNCIL_ROLES) {
-    const row = document.createElement("div");
-    row.className = "fog-council-role-row " + (role.faction === "clarity" ? "townsfolk" : "minion");
-    const content = document.createElement("div");
-    const name = document.createElement("strong");
-    name.textContent = role.name + " \xB7 " + (role.faction === "clarity" ? "\u6E05\u6670\u9635\u8425" : "\u8FF7\u96FE\u9635\u8425");
-    const desc = document.createElement("div");
-    desc.className = "fog-council-role-description";
-    desc.textContent = role.description;
-    content.append(name, desc);
-    row.append(content);
-    body.append(row);
+  const groups = [
+    ["\u9547\u6C11 \xB7 Townsfolk", TROUBLE_BREWING_ROLES.filter((role2) => role2.type === "townsfolk").map((role2) => role2.id)],
+    ["\u5916\u6765\u8005 \xB7 Outsiders", TROUBLE_BREWING_ROLES.filter((role2) => role2.type === "outsider").map((role2) => role2.id)],
+    ["\u722A\u7259 \xB7 Minions", TROUBLE_BREWING_ROLES.filter((role2) => role2.type === "minion").map((role2) => role2.id)],
+    ["\u6076\u9B54 \xB7 Demon", TROUBLE_BREWING_ROLES.filter((role2) => role2.type === "demon").map((role2) => role2.id)]
+  ];
+  for (const [label, ids] of groups) {
+    const section = document.createElement("section");
+    section.className = "clocktower-script-group";
+    const heading2 = document.createElement("h3");
+    heading2.textContent = label;
+    const grid = document.createElement("div");
+    grid.className = "clocktower-script-grid";
+    for (const roleId of ids) {
+      const role2 = clocktowerRoleById[roleId];
+      const row = document.createElement("div");
+      row.className = `clocktower-role-row ${role2.type}`;
+      const bar = document.createElement("span");
+      bar.className = "clocktower-role-bar";
+      const content = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "clocktower-role-name";
+      const title = document.createElement("span");
+      title.textContent = role2.name;
+      const timing = document.createElement("span");
+      timing.className = "clocktower-role-timing";
+      timing.textContent = role2.timing;
+      name.append(title, timing);
+      const description = document.createElement("div");
+      description.className = "clocktower-role-description";
+      description.textContent = role2.publicDescription;
+      content.append(name, description);
+      row.append(bar, content);
+      grid.append(row);
+    }
+    section.append(heading2, grid);
+    body.append(section);
   }
 }
-function renderFogCouncilSetup() {
+function renderClocktowerSetup() {
   messagesEl.replaceChildren();
   const card = document.createElement("section");
   card.className = "werewolf-setup-card";
-  const image = document.createElement("img");
-  image.src = chrome.runtime.getURL("SVG/\u8FF7\u96FE\u8BAE\u4F1A.svg");
-  image.alt = "";
-  const heading2 = document.createElement("h3");
-  heading2.textContent = "AI \u8FF7\u96FE\u8BAE\u4F1A";
-  const setup = state.fogCouncilSetup;
-  const aiNeeded = setup.playerCount - (setup.includeHuman ? 1 : 0);
-  const description = document.createElement("p");
-  description.textContent = setup.playerCount + " \u4F4D\u8BAE\u5458\uFF0C\u4E94\u8F6E\u4FE1\u53F7\u63A8\u7406\u3002\u4E24\u540D\u8FF7\u96FE\u6210\u5458\u9690\u85CF\u8EAB\u4EFD\uFF0C\u6E05\u6670\u9635\u8425\u9700\u8981\u901A\u8FC7\u516C\u5F00\u8FA9\u8BBA\u548C\u5BC6\u5C01\u6295\u7968\u4FEE\u590D\u4E09\u4E2A\u9891\u9053\u3002\u5F53\u524D\u9700\u8981 " + aiNeeded + " \u4E2A\u5DF2\u767B\u5F55\u7684 AI \u6A21\u578B\uFF0C\u5F00\u5C40\u4E3A\u6BCF\u4F4D AI \u521B\u5EFA\u72EC\u7ACB\u7F51\u9875\u4F1A\u8BDD\u3002";
-  card.append(image, heading2, description);
+  const icon = document.createElement("img");
+  icon.src = chrome.runtime.getURL("SVG/\u8FF7\u96FE\u8BAE\u4F1A.svg");
+  icon.alt = "";
+  const title = document.createElement("h3");
+  title.textContent = "AI \u8FF7\u96FE\u8BAE\u4F1A";
+  const setup = state.clocktowerSetup;
+  const neededAi = setup.playerCount - (setup.includeHuman ? 1 : 0);
+  const selected = state.settings.clocktowerProviders.filter((provider) => providerById[provider]?.enabled);
+  const body = document.createElement("p");
+  body.textContent = `${setup.playerCount} \u4EBA \xB7 \u7ECF\u5178\u8EAB\u4EFD\u5267\u672C \xB7 ${setup.setupMode === "curated" ? "\u63A8\u8350\u9635\u5BB9" : "\u968F\u673A\u5408\u6CD5\u9635\u5BB9"} \xB7 ${setup.includeHuman ? "\u4F60 + " : ""}${neededAi} \u4E2A AI \u73A9\u5BB6\u3002\u5DF2\u9009\u62E9 ${selected.length} \u4E2A\u6A21\u578B\uFF0C\u5F00\u59CB\u65F6\u4E3A\u6BCF\u540D AI \u521B\u5EFA\u72EC\u7ACB\u7F51\u9875\u4F1A\u8BDD\u3002`;
+  card.append(icon, title, body);
   messagesEl.append(card);
 }
-async function submitFogCouncilHumanAction(submission) {
-  const game = activeFogCouncilGame();
-  if (!game?.pendingHumanAction) return;
-  try {
-    await runtimeMessage({ type: "SUBMIT_FOG_COUNCIL_HUMAN_ACTION", gameId: game.id, submission });
-    clearComposer();
-  } catch (error) {
-    showComposerError(error instanceof Error ? error.message : String(error));
+function renderClocktowerHumanActionPanel(game, pending, dashboard) {
+  const panel = document.createElement("div");
+  panel.className = "clocktower-human-actions";
+  const intro = document.createElement("div");
+  intro.style.width = "100%";
+  intro.style.fontSize = "11px";
+  intro.style.color = "var(--muted)";
+  intro.textContent = pending.prompt.includes("[CURRENT TURN]") ? `\u8F6E\u5230\u4F60\u884C\u52A8 \xB7 ${clocktowerPhaseLabel(game)}` : pending.prompt;
+  panel.append(intro);
+  const submitDirect = (actionType, targetSeats) => void submitClocktowerHumanAction({ actionType, targetSeats });
+  if (pending.expectedActions.includes("vote_yes")) {
+    const yes = document.createElement("button");
+    yes.type = "button";
+    yes.className = "clocktower-target-button";
+    yes.textContent = "\u6295\u7968";
+    yes.addEventListener("click", () => submitDirect("vote_yes"));
+    const no = document.createElement("button");
+    no.type = "button";
+    no.className = "clocktower-target-button";
+    no.textContent = "\u4E0D\u6295";
+    no.addEventListener("click", () => submitDirect("vote_no"));
+    panel.append(yes, no);
   }
+  const targetAction = pending.expectedActions.find((action) => ["choose_player", "choose_players", "nominate", "slay"].includes(action));
+  if (targetAction) {
+    if (targetAction === "choose_players") {
+      for (const target of pending.allowedTargets) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `clocktower-target-button ${clocktowerSelectedTargets.includes(target) ? "active" : ""}`;
+        button.textContent = `${target}\u53F7`;
+        button.addEventListener("click", () => {
+          if (clocktowerSelectedTargets.includes(target)) clocktowerSelectedTargets = clocktowerSelectedTargets.filter((seat) => seat !== target);
+          else if (clocktowerSelectedTargets.length < pending.maxTargets) clocktowerSelectedTargets = [...clocktowerSelectedTargets, target];
+          renderMode();
+        });
+        panel.append(button);
+      }
+      const submit = document.createElement("button");
+      submit.type = "button";
+      submit.className = "primary-button";
+      submit.textContent = "\u786E\u8BA4";
+      submit.disabled = clocktowerSelectedTargets.length < pending.minTargets || clocktowerSelectedTargets.length > pending.maxTargets;
+      submit.addEventListener("click", () => submitDirect("choose_players", [...clocktowerSelectedTargets]));
+      panel.append(submit);
+    } else {
+      for (const target of pending.allowedTargets) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "clocktower-target-button";
+        button.textContent = `${targetAction === "nominate" ? "\u63D0\u540D " : targetAction === "slay" ? "\u53D1\u52A8\u6280\u80FD " : "\u9009\u62E9 "}${target}\u53F7`;
+        button.addEventListener("click", () => submitDirect(targetAction, [target]));
+        panel.append(button);
+      }
+    }
+  }
+  if (pending.expectedActions.includes("pass")) {
+    const pass = document.createElement("button");
+    pass.type = "button";
+    pass.className = "clocktower-target-button";
+    pass.textContent = "\u8DF3\u8FC7";
+    pass.addEventListener("click", () => submitDirect("pass"));
+    panel.append(pass);
+  }
+  if (pending.kind === "whisper" && pending.expectedActions.includes("whisper")) {
+    const hint = document.createElement("div");
+    hint.style.width = "100%";
+    hint.style.fontSize = "10px";
+    hint.style.color = "var(--muted)";
+    hint.textContent = "\u5148\u5728\u4E0B\u65B9\u8F93\u5165\u79C1\u804A\u5185\u5BB9\uFF0C\u518D\u9009\u62E9\u76EE\u6807\u5EA7\u4F4D\u3002";
+    panel.append(hint);
+    for (const target of pending.allowedTargets) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `clocktower-target-button ${clocktowerSelectedTargets[0] === target ? "active" : ""}`;
+      button.textContent = `${target}\u53F7`;
+      button.addEventListener("click", () => {
+        clocktowerSelectedTargets = [target];
+        renderMode();
+      });
+      panel.append(button);
+    }
+  }
+  dashboard.append(panel);
 }
-function renderFogCouncilGame(game) {
+function renderClocktowerGame(game) {
   messagesEl.replaceChildren();
   const dashboard = document.createElement("section");
   dashboard.className = "werewolf-dashboard";
   const hero = document.createElement("div");
   hero.className = "werewolf-hero";
-  const title = document.createElement("div");
-  title.className = "werewolf-hero-title";
-  title.textContent = game.title + " \xB7 " + fogCouncilStatusLabel(game);
-  const summary = document.createElement("p");
-  summary.className = "werewolf-hero-sub";
-  summary.textContent = "\u7B2C " + game.round + " \u8F6E \xB7 " + fogCouncilPhaseLabel(game) + " \xB7 \u6E05\u6670 " + game.clarityScore + " : " + game.mistScore + " \u8FF7\u96FE";
-  hero.append(title, summary);
+  const heroTitle = document.createElement("div");
+  heroTitle.className = "werewolf-hero-title";
+  const title = document.createElement("span");
+  title.textContent = game.title;
+  const status = document.createElement("span");
+  status.textContent = clocktowerStatusLabel(game);
+  status.style.color = game.status === "error" || game.status === "paused" ? "var(--danger)" : "var(--muted)";
+  status.style.fontSize = "10px";
+  heroTitle.append(title, status);
+  const sub = document.createElement("div");
+  sub.className = "werewolf-hero-sub";
+  sub.textContent = `\u7ECF\u5178\u8EAB\u4EFD\u5267\u672C \xB7 ${game.rulesetSnapshot.playerCount} \u4EBA \xB7 \u7B2C ${game.day} \u5929 \xB7 ${clocktowerPhaseLabel(game)} \xB7 Final-only`;
+  hero.append(heroTitle, sub);
   dashboard.append(hero);
+  const human = clocktowerHumanPlayer(game);
+  if (human) {
+    const card = document.createElement("div");
+    card.className = "clocktower-private-card";
+    const perceived = clocktowerRoleById[human.perceivedCharacter];
+    let extra = "";
+    if (!game.rulesetSnapshot.teensyvilleEvilInfo && human.alignment === "evil") {
+      if (human.trueCharacter === "imp") {
+        const minions = game.players.filter((player) => clocktowerRoleById[player.trueCharacter].type === "minion").map((player) => `${player.seat}\u53F7`).join("\u3001");
+        extra = ` \u722A\u7259\uFF1A${minions || "\u65E0"}\uFF1B\u5B89\u5168\u4F2A\u88C5\uFF1A${game.demonBluffs.map((role2) => clocktowerRoleById[role2].name).join("\u3001")}\u3002`;
+      } else {
+        const demon = game.players.find((player) => player.trueCharacter === "imp");
+        extra = ` \u6076\u9B54\uFF1A${demon?.seat ?? "?"}\u53F7\u3002`;
+      }
+    }
+    card.textContent = `\u4F60\u662F ${human.seat}\u53F7 \xB7 ${perceived.name} \xB7 ${human.alignment === "good" ? "\u5584\u826F" : "\u90AA\u6076"}\u9635\u8425\u3002\u80FD\u529B\uFF1A${perceived.publicDescription}${extra}`;
+    dashboard.append(card);
+  }
   const seats = document.createElement("div");
   seats.className = "werewolf-seat-grid";
-  for (const player of game.players) {
+  for (const player of [...game.players].sort((a, b) => a.seat - b.seat)) {
+    const publicAlive = publiclyAlive(game, player);
     const seat = document.createElement("div");
-    seat.className = "werewolf-seat " + (player.seat === game.humanSeat ? "human" : "");
+    seat.className = `werewolf-seat ${publicAlive ? "" : "dead"} ${player.controller === "human" ? "human" : ""}`;
+    if (player.providerId) {
+      const avatar = document.createElement("img");
+      avatar.src = providerIconUrl(player.providerId);
+      avatar.alt = "";
+      seat.append(avatar);
+    } else {
+      const humanAvatar = document.createElement("div");
+      humanAvatar.textContent = "\u4F60";
+      humanAvatar.style.fontWeight = "650";
+      seat.append(humanAvatar);
+    }
     const name = document.createElement("strong");
-    const provider = game.seatProviders[player.seat];
-    name.textContent = player.seat + "\u53F7 \xB7 " + (provider ? providerLabel(provider) : "\u4F60");
-    const role = document.createElement("span");
-    role.textContent = game.status === "ended" || player.seat === game.humanSeat ? COUNCIL_ROLE_BY_ID[player.role].name : "\u8EAB\u4EFD\u9690\u85CF";
-    seat.append(name, role);
+    name.textContent = `${player.seat}\u53F7 \xB7 ${player.controller === "human" ? "\u4F60" : providerLabel(player.providerId)}`;
+    const role2 = document.createElement("span");
+    role2.textContent = game.status === "ended" ? clocktowerRoleById[player.trueCharacter].name : player.controller === "human" ? clocktowerRoleById[player.perceivedCharacter].name : publicAlive ? "\u8EAB\u4EFD\u9690\u85CF" : "\u5DF2\u6B7B\u4EA1";
+    seat.append(name, role2);
+    if (!publicAlive) {
+      const vote = document.createElement("span");
+      vote.className = "clocktower-dead-vote";
+      vote.textContent = player.deadVoteAvailable ? "\u6B7B\u8005\u7968\u53EF\u7528" : "\u6B7B\u8005\u7968\u5DF2\u7528";
+      seat.append(vote);
+    }
     seats.append(seat);
   }
   dashboard.append(seats);
-  if (game.humanSeat && game.current && game.status !== "ended") {
-    const self = game.players.find((player) => player.seat === game.humanSeat);
-    const clue = document.createElement("div");
-    clue.className = "fog-council-private-card";
-    clue.textContent = "\u4F60\u7684\u8EAB\u4EFD\uFF1A" + COUNCIL_ROLE_BY_ID[self.role].name + " \xB7 " + (self.faction === "clarity" ? "\u6E05\u6670" : "\u8FF7\u96FE") + "\u9635\u8425\u3002\u672C\u8F6E\u4FE1\u53F7\uFF1A" + game.current.clues[self.seat].text;
-    dashboard.append(clue);
+  if (game.nominations.length) {
+    const latest = game.nominations.filter((item) => item.day === game.day).at(-1);
+    if (latest) {
+      const nomination = document.createElement("div");
+      nomination.className = "clocktower-nomination";
+      nomination.textContent = `\u4ECA\u65E5\u6700\u8FD1\u63D0\u540D\uFF1A${latest.nominatorSeat}\u53F7 \u2192 ${latest.nomineeSeat}\u53F7 \xB7 ${latest.resolved ? `${latest.voteCount}\u7968 / \u95E8\u69DB${latest.threshold}` : "\u8FDB\u884C\u4E2D"}${game.aboutToDieSeat ? ` \xB7 \u5F53\u524D\u5F85\u5904\u51B3\uFF1A${game.aboutToDieSeat}\u53F7` : ""}`;
+      dashboard.append(nomination);
+    }
   }
   const events = document.createElement("div");
   events.className = "werewolf-events";
-  for (const item of fogCouncilVisibleEvents(game)) {
+  for (const event of clocktowerVisibleEvents(game)) {
+    if (!event.content || event.type === "phase") continue;
     const row = document.createElement("article");
-    row.className = "werewolf-event";
+    const author = event.authorSeat ? game.players.find((player) => player.seat === event.authorSeat) : void 0;
+    row.className = `werewolf-event ${event.visibility.type === "private" ? "private" : ""} ${author?.providerId ? providerById[author.providerId].colorClass : ""}`;
     const meta = document.createElement("div");
     meta.className = "werewolf-event-meta";
-    meta.textContent = item.actorSeat ? item.actorSeat + "\u53F7\u8BAE\u5458" : "\u8BAE\u4F1A\u4E3B\u6301\u4EBA";
-    const text2 = document.createElement("div");
-    text2.className = "werewolf-event-body";
-    text2.textContent = item.text;
-    row.append(meta, text2);
+    meta.textContent = event.authorSeat ? `${event.authorSeat}\u53F7 \xB7 ${author?.controller === "human" ? "\u4F60" : providerLabel(author?.providerId)}` : event.visibility.type === "private" ? "\u79C1\u5BC6\u4FE1\u606F" : "\u8BF4\u4E66\u4EBA";
+    const body = document.createElement("div");
+    body.className = "werewolf-event-body";
+    body.innerHTML = renderMarkdown(event.content);
+    decorateRenderedMarkdown(body);
+    row.append(meta, body);
+    if (author?.controller === "ai") row.append(createReplyActions(event.content));
     events.append(row);
   }
   dashboard.append(events);
   if (game.pendingTurn) {
-    const thinking = document.createElement("p");
+    const thinking = document.createElement("div");
     thinking.className = "werewolf-thinking";
-    thinking.textContent = game.pendingTurn.kind === "vote" ? "\u4E00\u540D\u8BAE\u5458\u6B63\u5728\u5BC6\u5C01\u8868\u51B3\u2026" : game.pendingTurn.seat + "\u53F7\u6B63\u5728\u53D1\u8A00\u2026";
+    const hidden = game.phase === "first_night" || game.phase === "other_night";
+    thinking.textContent = hidden ? "\u591C\u95F4\u884C\u52A8\u5904\u7406\u4E2D\u2026" : `${game.pendingTurn.seat}\u53F7\u6B63\u5728\u884C\u52A8\u2026`;
     dashboard.append(thinking);
   }
-  if (game.pendingHumanAction?.kind === "vote") {
-    const panel = document.createElement("div");
-    panel.className = "fog-council-human-actions";
-    for (const channel of ["A", "B", "C"]) {
-      const button = document.createElement("button");
-      button.className = "fog-council-target-button";
-      button.textContent = "\u5BC6\u5C01\u6295\u7968\uFF1A" + channel;
-      button.addEventListener("click", () => void submitFogCouncilHumanAction({ channel }));
-      panel.append(button);
-    }
-    dashboard.append(panel);
-  }
+  if (game.pendingHumanAction) renderClocktowerHumanActionPanel(game, game.pendingHumanAction, dashboard);
   messagesEl.append(dashboard);
   requestAnimationFrame(() => {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   });
 }
-function renderFogCouncil() {
-  const game = activeFogCouncilGame();
-  if (!game) renderFogCouncilSetup();
-  else renderFogCouncilGame(game);
+function renderClocktower() {
+  const game = activeClocktowerGame();
+  if (!game) renderClocktowerSetup();
+  else renderClocktowerGame(game);
+}
+function updateStreamingBubbleInPlace(messageId, text2) {
+  const row = [...messagesEl.children].find((item) => item.dataset.messageId === messageId);
+  if (!row || row.dataset.messageStatus !== "streaming") return false;
+  if (row.dataset.renderedText === text2) return true;
+  const bubble = row.querySelector(".message-bubble");
+  if (!bubble) return false;
+  const nearBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 90;
+  bubble.innerHTML = renderMarkdown(text2 || "\u2026");
+  decorateRenderedMarkdown(bubble);
+  row.dataset.renderedText = text2;
+  if (nearBottom) requestAnimationFrame(() => {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+  return true;
 }
 function renderMessages() {
   if (state.activeMode === "werewolf") {
     renderWerewolf();
     return;
   }
-  if (state.activeMode === "fog_council") {
-    renderFogCouncil();
+  if (state.activeMode === "clocktower") {
+    renderClocktower();
     return;
   }
   const session = activeSession();
+  const rows = [...messagesEl.children];
+  if (session.messages.length > 0 && rows.length === session.messages.length && session.messages.every((message, index) => rows[index].dataset.messageId === message.id && rows[index].dataset.messageStatus === (message.status ?? ""))) {
+    for (const message of session.messages) {
+      if (message.role === "assistant" && message.status === "streaming") {
+        updateStreamingBubbleInPlace(message.id, liveStreamText.get(message.id) ?? message.text);
+      }
+    }
+    return;
+  }
   messagesEl.replaceChildren();
   if (!session.messages.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.textContent = session.mode === "qa" ? "\u540C\u65F6\u5411\u591A\u4E2A AI \u63D0\u95EE\uFF0C\u56DE\u590D\u4F1A\u6309\u6A21\u578B\u5206\u522B\u663E\u793A\u3002" : session.mode === "roundtable" ? "\u8F93\u5165\u95EE\u9898\u5E76\u8BBE\u7F6E\u8F6E\u6570\uFF0CAI \u4F1A\u6309\u8BBE\u7F6E\u987A\u5E8F\u4F9D\u6B21\u63A5\u529B\u3002" : "\u9009\u62E9\u4E13\u5BB6\u9884\u8BBE\u540E\u5F00\u59CB\u8BA8\u8BBA\u3002\u4E13\u5BB6\u63D0\u793A\u8BCD\u53EA\u5728\u5404\u6A21\u578B\u9996\u6B21\u53D1\u8A00\u65F6\u6CE8\u5165\uFF0C\u4E0D\u5199\u5165\u4F1A\u8BDD\u6B63\u6587\u3002";
     messagesEl.appendChild(empty);
+    if (session.mode === "expert") {
+      const quick = document.createElement("section");
+      quick.className = "expert-quick-setup";
+      for (const provider of state.settings.roundtableProviders.filter((id2) => providerById[id2]?.enabled)) {
+        const label = document.createElement("label");
+        label.textContent = providerLabel(provider);
+        label.append(createPresetSelect(state.settings.expertPresetByProvider[provider], `${providerLabel(provider)} \u4E13\u5BB6\u9884\u8BBE`, async (presetId) => {
+          if (presetId) state.settings.expertPresetByProvider[provider] = presetId;
+          else delete state.settings.expertPresetByProvider[provider];
+          syncBlankExpertSessionAssignments();
+          await saveState(state);
+        }));
+        quick.append(label);
+      }
+      const manage = document.createElement("button");
+      manage.textContent = "\u7BA1\u7406\u4E13\u5BB6\u9884\u8BBE";
+      manage.className = "secondary-button";
+      manage.addEventListener("click", () => {
+        renderExpertPresets();
+        openOverlay("expertOverlay");
+      });
+      quick.append(manage);
+      messagesEl.append(quick);
+    }
     return;
   }
   for (const message of session.messages) {
     const row = document.createElement("article");
     row.className = `message-row ${message.role}`;
+    row.dataset.messageId = message.id;
+    row.dataset.messageStatus = message.status ?? "";
+    if (message.status !== "streaming") liveStreamText.delete(message.id);
+    const displayText = message.status === "streaming" ? liveStreamText.get(message.id) ?? message.text : message.text;
+    row.dataset.renderedText = displayText;
     if (message.provider) row.classList.add(providerById[message.provider].colorClass);
     const meta = document.createElement("div");
     meta.className = "message-meta";
@@ -5053,10 +5473,16 @@ function renderMessages() {
     const author = document.createElement("span");
     author.textContent = message.role === "user" ? "\u4F60" : providerDisplayLabel(session, message.provider);
     meta.append(author);
+    if (message.kind === "summary") {
+      const tag2 = document.createElement("span");
+      tag2.className = "summary-label";
+      tag2.textContent = "\u6C47\u603B\u7ED3\u8BBA";
+      meta.append(tag2);
+    }
     const bubble = document.createElement("div");
     bubble.className = "message-bubble";
     if (message.role === "assistant") {
-      bubble.innerHTML = renderMarkdown(message.text || (message.status === "pending" ? "\u2026" : ""));
+      bubble.innerHTML = renderMarkdown(displayText || (message.status === "pending" ? "\u2026" : ""));
       decorateRenderedMarkdown(bubble);
     } else {
       const text2 = document.createElement("div");
@@ -5076,6 +5502,23 @@ function renderMessages() {
       status.className = `message-status ${message.status === "error" ? "error" : ""}`;
       status.textContent = message.status === "pending" ? "\u7B49\u5F85\u56DE\u590D" : message.status === "streaming" ? "\u751F\u6210\u4E2D" : message.status === "interrupted" ? "\u5DF2\u4E2D\u65AD" : message.error ?? "\u53D1\u9001\u5931\u8D25";
       row.append(status);
+      if ((message.status === "error" || message.status === "interrupted") && isSequentialMode(session.mode) && session.execution?.status === "paused") {
+        const expected = session.execution.providers[session.execution.providerIndex];
+        if (message.provider === expected) {
+          const actions = document.createElement("div");
+          actions.className = "reply-actions";
+          for (const [label, type] of [["\u91CD\u8BD5\u6B64\u6A21\u578B", "RESUME_SEQUENTIAL_SESSION"], ["\u8DF3\u8FC7\u6B64\u6A21\u578B", "SKIP_SEQUENTIAL_TURN"]]) {
+            const button = document.createElement("button");
+            button.className = "secondary-button";
+            button.textContent = label;
+            button.addEventListener("click", () => {
+              void runtimeMessage({ type, sessionId: session.id }).catch((error) => showComposerError(error.message));
+            });
+            actions.append(button);
+          }
+          row.append(actions);
+        }
+      }
     }
     messagesEl.append(row);
   }
@@ -5173,86 +5616,138 @@ async function handleWerewolfHumanTextSend() {
   if (!text2) return showComposerError("\u8BF7\u8F93\u5165\u4F60\u7684\u53D1\u8A00");
   await submitWerewolfHumanAction({ text: text2 });
 }
-function renderFogCouncilControls() {
-  const game = activeFogCouncilGame();
-  const actionButton = el("fogCouncilActionButton");
-  const status = el("fogCouncilStatus");
-  const humanSend = el("fogCouncilHumanSendButton");
-  const textTurn = fogCouncilHumanTextTurn(game?.pendingHumanAction);
-  el("composer").classList.toggle("hidden", !textTurn);
-  el("composer").classList.toggle("werewolf-human-composer", textTurn);
-  el("attachButton").classList.add("hidden");
+function renderClocktowerControls() {
+  const game = activeClocktowerGame();
+  const actionButton = el("clocktowerActionButton");
+  const status = el("clocktowerStatus");
+  const composer = el("composer");
+  const attachButton = el("attachButton");
+  const humanSend = el("clocktowerHumanSendButton");
+  const textTurn = clocktowerHumanTextTurn(game?.pendingHumanAction);
+  composer.classList.toggle("hidden", !textTurn);
+  composer.classList.toggle("werewolf-human-composer", textTurn);
+  attachButton.classList.toggle("hidden", true);
   qaSendButton.classList.add("hidden");
   humanSend.classList.toggle("hidden", !textTurn);
   attachmentTray.classList.add("hidden");
   messageInput.rows = 2;
-  messageInput.placeholder = "\u8F93\u5165\u4F60\u7684\u8BAE\u4F1A\u53D1\u8A00\u2026";
+  messageInput.placeholder = game?.pendingHumanAction?.kind === "whisper" ? "\u8F93\u5165\u79C1\u804A\u5185\u5BB9\u2026" : textTurn ? "\u8F93\u5165\u4F60\u7684\u53D1\u8A00\u2026" : "\u8F93\u5165\u6D88\u606F\u2026";
   if (!game) {
     actionButton.textContent = "\u5F00\u59CB";
     actionButton.classList.remove("danger");
-    status.textContent = state.fogCouncilSetup.playerCount + " \u4EBA \xB7 \u5F85\u5F00\u59CB";
+    status.textContent = `${state.clocktowerSetup.playerCount} \u4EBA \xB7 \u5F85\u5F00\u59CB`;
     return;
   }
-  actionButton.textContent = game.status === "running" ? "\u4E2D\u65AD" : game.status === "paused" ? "\u7EE7\u7EED" : game.status === "ended" ? "\u65B0\u5C40" : "\u5F00\u59CB";
-  actionButton.classList.toggle("danger", game.status === "running");
-  status.textContent = fogCouncilStatusLabel(game);
+  actionButton.textContent = game.status === "running" || game.status === "waiting_human" ? "\u4E2D\u65AD" : game.status === "paused" || game.status === "error" ? "\u7EE7\u7EED" : game.status === "ended" ? "\u65B0\u5C40" : "\u5F00\u59CB";
+  actionButton.classList.toggle("danger", game.status === "running" || game.status === "waiting_human");
+  status.textContent = clocktowerStatusLabel(game);
 }
-async function handleFogCouncilAction() {
-  const game = activeFogCouncilGame();
+async function handleClocktowerAction() {
+  const game = activeClocktowerGame();
   try {
     if (!game) {
-      const setup = state.fogCouncilSetup;
+      const setup = state.clocktowerSetup;
       const needed = setup.playerCount - (setup.includeHuman ? 1 : 0);
-      const providers = state.settings.fogCouncilProviders.filter((provider) => providerById[provider]?.enabled);
-      if (providers.length < needed) return showComposerError("\u5F53\u524D\u81F3\u5C11\u9700\u8981 " + needed + " \u4E2A AI \u6A21\u578B");
-      const selected = providers.slice(0, needed);
-      await refreshProviderAvailability(selected, false);
-      rejectKnownBrokenProviders(selected);
-      const normalized = { ...setup, providerIds: selected };
-      const response = await runtimeMessage({ type: "CREATE_FOG_COUNCIL_GAME", setup: normalized });
-      state.activeFogCouncilGameId = response.gameId;
-      await runtimeMessage({ type: "START_FOG_COUNCIL_GAME", gameId: response.gameId });
+      const providers = state.settings.clocktowerProviders.filter((provider) => providerById[provider]?.enabled);
+      if (providers.length < needed) return showComposerError(`\u5F53\u524D ${setup.playerCount} \u4EBA\u914D\u7F6E\u81F3\u5C11\u9700\u8981 ${needed} \u4E2A\u5DF2\u63A5\u5165 AI \u6A21\u578B`);
+      const selectedProviders2 = providers.slice(0, needed);
+      await refreshProviderAvailability(selectedProviders2, false);
+      rejectKnownBrokenProviders(selectedProviders2);
+      const normalized = { ...setup, providerIds: selectedProviders2 };
+      const response = await runtimeMessage({ type: "CREATE_CLOCKTOWER_GAME", setup: normalized });
+      state.activeClocktowerGameId = response.gameId;
+      await runtimeMessage({ type: "START_CLOCKTOWER_GAME", gameId: response.gameId });
       return;
     }
-    if (game.status === "running") await runtimeMessage({ type: "INTERRUPT_FOG_COUNCIL_GAME", gameId: game.id });
-    else if (game.status === "paused") await runtimeMessage({ type: "RESUME_FOG_COUNCIL_GAME", gameId: game.id });
-    else if (game.status === "ended") {
-      await runtimeMessage({ type: "SET_ACTIVE_FOG_COUNCIL_GAME" });
-      state.activeFogCouncilGameId = void 0;
+    if (game.status === "running" || game.status === "waiting_human") {
+      await runtimeMessage({ type: "INTERRUPT_CLOCKTOWER_GAME", gameId: game.id });
+      return;
+    }
+    if (game.status === "error" && game.phase === "setup") {
+      await runtimeMessage({ type: "START_CLOCKTOWER_GAME", gameId: game.id });
+      return;
+    }
+    if (game.status === "paused" || game.status === "error") {
+      await runtimeMessage({ type: "RESUME_CLOCKTOWER_GAME", gameId: game.id });
+      return;
+    }
+    if (game.status === "ended") {
+      await runtimeMessage({ type: "SET_ACTIVE_CLOCKTOWER_GAME" });
+      state.activeClocktowerGameId = void 0;
       renderMode();
-    } else await runtimeMessage({ type: "START_FOG_COUNCIL_GAME", gameId: game.id });
+      return;
+    }
+    await runtimeMessage({ type: "START_CLOCKTOWER_GAME", gameId: game.id });
   } catch (error) {
     showComposerError(error instanceof Error ? error.message : String(error));
   }
 }
-async function handleFogCouncilHumanTextSend() {
-  const pending = activeFogCouncilGame()?.pendingHumanAction;
-  if (!pending || pending.kind !== "speech") return;
+async function handleClocktowerHumanTextSend() {
+  const game = activeClocktowerGame();
+  const pending = game?.pendingHumanAction;
+  if (!pending || !clocktowerHumanTextTurn(pending)) return;
   const text2 = messageInput.value.trim();
-  if (!text2) return showComposerError("\u8BF7\u8F93\u5165\u4F60\u7684\u8BAE\u4F1A\u53D1\u8A00");
-  await submitFogCouncilHumanAction({ text: text2 });
+  if (!text2) return showComposerError(pending.kind === "whisper" ? "\u8BF7\u8F93\u5165\u79C1\u804A\u5185\u5BB9" : "\u8BF7\u8F93\u5165\u4F60\u7684\u53D1\u8A00");
+  if (pending.kind === "whisper" && pending.expectedActions.includes("whisper")) {
+    const target = clocktowerSelectedTargets[0];
+    if (!target) return showComposerError("\u8BF7\u5148\u9009\u62E9\u79C1\u804A\u76EE\u6807");
+    await submitClocktowerHumanAction({ text: text2, actionType: "whisper", targetSeats: [target] });
+    return;
+  }
+  await submitClocktowerHumanAction({ text: text2 });
 }
 function renderMode() {
+  document.body.dataset.mode = state.activeMode;
   document.querySelectorAll(".mode-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.mode === state.activeMode));
   const sequential = isSequentialMode(state.activeMode);
   const werewolf = state.activeMode === "werewolf";
-  const fogCouncil = state.activeMode === "fog_council";
+  const clocktower = state.activeMode === "clocktower";
   roundControls.classList.toggle("hidden", !sequential);
   el("werewolfControls").classList.toggle("hidden", !werewolf);
-  el("fogCouncilControls").classList.toggle("hidden", !fogCouncil);
-  qaSendButton.classList.toggle("hidden", sequential || werewolf || fogCouncil);
+  el("clocktowerControls").classList.toggle("hidden", !clocktower);
+  qaSendButton.classList.toggle("hidden", sequential || werewolf || clocktower);
   el("werewolfHumanSendButton").classList.add("hidden");
-  el("fogCouncilHumanSendButton").classList.add("hidden");
-  if (!werewolf && !fogCouncil) {
+  el("clocktowerHumanSendButton").classList.add("hidden");
+  if (!werewolf && !clocktower) {
     el("composer").classList.remove("hidden");
     el("attachButton").classList.remove("hidden");
     messageInput.placeholder = "\u8F93\u5165\u6D88\u606F\uFF0C\u6216\u7C98\u8D34\u56FE\u7247/\u9644\u4EF6\u2026";
   }
-  el("newConversationButton").title = state.activeMode === "werewolf" ? "\u65B0\u72FC\u4EBA\u6740\u5BF9\u5C40" : state.activeMode === "fog_council" ? "\u65B0\u8FF7\u96FE\u8BAE\u4F1A\u5BF9\u5C40" : `\u65B0${modeLabel(state.activeMode)}\u4F1A\u8BDD`;
+  el("newConversationButton").title = state.activeMode === "werewolf" ? "\u65B0\u72FC\u4EBA\u6740\u5BF9\u5C40" : state.activeMode === "clocktower" ? "\u65B0\u8FF7\u96FE\u8BAE\u4F1A\u5BF9\u5C40" : `\u65B0${modeLabel(state.activeMode)}\u4F1A\u8BDD`;
   renderMessages();
+  if (!sequential && !werewolf && !clocktower) {
+    const pending = Object.keys(activeSession().pendingOperations ?? {}).length > 0;
+    qaSendButton.textContent = pending ? "\u4E2D\u65AD" : "\u53D1\u9001";
+    qaSendButton.setAttribute("aria-label", pending ? "\u4E2D\u65AD\u672C\u8F6E AI \u5BF9\u8BDD" : "\u53D1\u9001");
+    qaSendButton.classList.toggle("danger", pending);
+  }
   if (sequential) renderSequentialControls();
+  renderSummaryControls();
   if (werewolf) renderWerewolfControls();
-  if (fogCouncil) renderFogCouncilControls();
+  if (clocktower) renderClocktowerControls();
+}
+function renderSummaryControls() {
+  const controls = el("summaryControls");
+  if (!isConversationMode(state.activeMode)) {
+    controls.classList.add("hidden");
+    return;
+  }
+  const session = activeSession();
+  const done = session.messages.filter((message) => message.role === "assistant" && message.status === "completed" && message.text.trim() && message.kind !== "summary");
+  const busy = Object.keys(session.pendingOperations ?? {}).length > 0 || session.execution?.status === "running";
+  controls.classList.toggle("hidden", done.length < 2 || busy);
+  if (done.length < 2 || busy) return;
+  const select = el("summaryProviderSelect");
+  const selected = select.value;
+  const providers = [...new Set(done.map((message) => message.provider).filter((id2) => Boolean(id2)))];
+  select.replaceChildren();
+  for (const provider of providers) {
+    const option = document.createElement("option");
+    option.value = provider;
+    option.textContent = providerLabel(provider);
+    select.append(option);
+  }
+  if (providers.includes(selected)) select.value = selected;
 }
 function renderAttachmentTray() {
   attachmentTray.replaceChildren();
@@ -5309,6 +5804,18 @@ function clearComposer() {
 function attachmentMetadata(payload) {
   return payload.attachments.map(({ id: id2, name, type, size, kind }) => ({ id: id2, name, type, size, kind }));
 }
+function compatibleAttachmentProviders(providers, payload) {
+  if (!payload.attachments.length) return providers;
+  const unsupported = providers.filter((provider) => payload.attachments.some((attachment) => {
+    const cap = providerById[provider].capabilities;
+    return attachment.kind === "image" ? !cap.images : !cap.attachments;
+  }));
+  if (unsupported.length) {
+    const names = unsupported.map(providerLabel).join("\u3001");
+    showComposerError(payload.text.trim() ? `${names} \u4E0D\u652F\u6301\u4E0A\u4F20\u672C\u6B21\u9644\u4EF6\uFF0C\u5C06\u4EC5\u6536\u5230\u6587\u5B57` : `${names} \u4E0D\u652F\u6301\u4E0A\u4F20\u672C\u6B21\u9644\u4EF6\uFF0C\u5DF2\u8DF3\u8FC7\u65E0\u6587\u5B57\u7684\u53D1\u9001`);
+  }
+  return payload.text.trim() ? providers : providers.filter((provider) => !unsupported.includes(provider));
+}
 async function runtimeMessage(message) {
   const response = await chrome.runtime.sendMessage(message);
   if (response && response.success === false) throw new Error(response.error || "\u6269\u5C55\u64CD\u4F5C\u5931\u8D25");
@@ -5340,11 +5847,21 @@ function rejectKnownBrokenProviders(providers) {
   throw new Error(`\u4EE5\u4E0B\u6A21\u578B\u5F53\u524D\u4E0D\u53EF\u7528\uFF1A${detail}`);
 }
 async function handleQaSend() {
+  if (Object.keys(activeSession().pendingOperations ?? {}).length) {
+    try {
+      await runtimeMessage({ type: "INTERRUPT_SESSION", sessionId: activeSession().id });
+    } catch (error) {
+      showComposerError(error instanceof Error ? error.message : String(error));
+    }
+    return;
+  }
   const payload = takeComposerPayload();
   if (!payload) return;
   const session = activeSession();
-  const providers = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
-  if (!providers.length) return showComposerError("\u8BF7\u5148\u5728\u8BBE\u7F6E\u91CC\u9009\u62E9\u81F3\u5C11\u4E00\u4E2A\u5DF2\u63A5\u5165\u6A21\u578B");
+  const selectedProviders2 = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
+  if (!selectedProviders2.length) return showComposerError("\u8BF7\u5148\u5728\u8BBE\u7F6E\u91CC\u9009\u62E9\u81F3\u5C11\u4E00\u4E2A\u5DF2\u63A5\u5165\u6A21\u578B");
+  const providers = compatibleAttachmentProviders(selectedProviders2, payload);
+  if (!providers.length) return showComposerError("\u6240\u9009\u6A21\u578B\u65E0\u6CD5\u4E0A\u4F20\u9644\u4EF6\uFF0C\u8BF7\u66F4\u6362\u6A21\u578B\u6216\u9644\u5E26\u6587\u5B57");
   await refreshProviderAvailability(providers, false);
   session.messages.push({ id: id("msg"), role: "user", text: payload.text, attachments: attachmentMetadata(payload), createdAt: Date.now(), status: "completed" });
   if (session.title === "\u65B0\u4F1A\u8BDD") session.title = deriveTitle(payload);
@@ -5384,6 +5901,7 @@ async function handleSequentialAction() {
   if (!payload) return showComposerError("\u8BF7\u8F93\u5165\u95EE\u9898\u6216\u6DFB\u52A0\u9644\u4EF6");
   const providers = providersForMode(session.mode).filter((provider) => providerById[provider].enabled);
   if (providers.length < 2) return showComposerError(`${modeLabel(session.mode)}\u81F3\u5C11\u9009\u62E9\u4E24\u4E2A\u5DF2\u63A5\u5165\u6A21\u578B`);
+  if (!compatibleAttachmentProviders(providers, payload).length) return showComposerError("\u6240\u9009\u6A21\u578B\u65E0\u6CD5\u4E0A\u4F20\u9644\u4EF6\uFF0C\u8BF7\u66F4\u6362\u6A21\u578B\u6216\u9644\u5E26\u6587\u5B57");
   await refreshProviderAvailability(providers, false);
   if (session.mode === "expert" && session.messages.length === 0) {
     session.expertAssignments = captureExpertAssignments();
@@ -5445,6 +5963,27 @@ function providerOptionBase(providerId, checked) {
   }
   return { row, checkbox };
 }
+function createPresetSelect(selectedId, title, onChange) {
+  const select = document.createElement("select");
+  select.className = "expert-select";
+  select.title = title;
+  select.setAttribute("aria-label", title);
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "\u65E0\u9884\u8BBE";
+  select.append(none);
+  for (const preset of state.expertPresets) {
+    const option = document.createElement("option");
+    option.value = preset.id;
+    option.textContent = preset.name;
+    select.append(option);
+  }
+  select.value = selectedId ?? "";
+  select.addEventListener("change", () => {
+    void onChange(select.value);
+  });
+  return select;
+}
 function renderQaSettings() {
   const container = el("qaProviderSettings");
   container.replaceChildren();
@@ -5456,6 +5995,13 @@ function renderQaSettings() {
       state.settings.qaProviders = PROVIDERS.map((item) => item.id).filter((providerId) => set.has(providerId));
       await saveState(state);
     });
+    if (provider.enabled) {
+      row.append(createPresetSelect(state.settings.qaPresetByProvider[provider.id], `${provider.label} \u5BF9\u8BDD\u9884\u8BBE`, async (presetId) => {
+        if (presetId) state.settings.qaPresetByProvider[provider.id] = presetId;
+        else delete state.settings.qaPresetByProvider[provider.id];
+        await saveState(state);
+      }));
+    }
     container.append(row);
   }
 }
@@ -5491,27 +6037,12 @@ function renderSequentialSettings(mode, containerId) {
       renderSequentialSettings(mode, containerId);
     });
     if (provider.enabled) {
-      const select = document.createElement("select");
-      select.className = "expert-select";
-      select.title = "\u9009\u62E9\u4E13\u5BB6\u9884\u8BBE";
-      const none = document.createElement("option");
-      none.value = "";
-      none.textContent = "None";
-      select.append(none);
-      for (const preset of state.expertPresets) {
-        const option = document.createElement("option");
-        option.value = preset.id;
-        option.textContent = preset.name;
-        select.append(option);
-      }
-      select.value = state.settings.expertPresetByProvider[provider.id] ?? "";
-      select.addEventListener("change", async () => {
-        if (select.value) state.settings.expertPresetByProvider[provider.id] = select.value;
+      row.append(createPresetSelect(state.settings.expertPresetByProvider[provider.id], `${provider.label} \u4E13\u5BB6\u9884\u8BBE`, async (presetId) => {
+        if (presetId) state.settings.expertPresetByProvider[provider.id] = presetId;
         else delete state.settings.expertPresetByProvider[provider.id];
         syncBlankExpertSessionAssignments();
         await saveState(state);
-      });
-      row.append(select);
+      }));
     }
     if (provider.enabled && checkbox.checked) {
       const index = selectedProviders(mode).indexOf(provider.id);
@@ -5645,102 +6176,126 @@ function renderWerewolfSettings() {
     container.append(row);
   }
 }
-async function persistFogCouncilSettings() {
-  state.fogCouncilSetup.providerIds = [...state.settings.fogCouncilProviders];
+async function persistClocktowerSettings() {
+  state.clocktowerSetup.providerIds = [...state.settings.clocktowerProviders];
   await saveState(state);
-  await runtimeMessage({ type: "UPDATE_FOG_COUNCIL_SETUP", setup: state.fogCouncilSetup });
+  await runtimeMessage({ type: "UPDATE_CLOCKTOWER_SETUP", setup: state.clocktowerSetup });
 }
-function renderFogCouncilSettings() {
-  const container = el("fogCouncilProviderSettings");
-  const countSelect = el("fogCouncilPlayerCount");
-  const humanToggle = el("fogCouncilIncludeHuman");
-  const humanSeat = el("fogCouncilHumanSeat");
-  const setup = state.fogCouncilSetup;
-  countSelect.value = String(setup.playerCount);
-  humanToggle.checked = setup.includeHuman;
+function renderClocktowerSettings() {
+  const container = el("clocktowerProviderSettings");
+  const countSelect = el("clocktowerPlayerCount");
+  const scriptSelect = el("clocktowerScript");
+  const setupMode = el("clocktowerSetupMode");
+  const humanToggle = el("clocktowerIncludeHuman");
+  const humanSeat = el("clocktowerHumanSeat");
+  countSelect.value = String(state.clocktowerSetup.playerCount);
+  scriptSelect.value = state.clocktowerSetup.scriptId;
+  setupMode.value = state.clocktowerSetup.setupMode;
+  humanToggle.checked = state.clocktowerSetup.includeHuman;
   humanSeat.replaceChildren();
-  const random = document.createElement("option");
-  random.value = "0";
-  random.textContent = "\u968F\u673A";
-  humanSeat.append(random);
-  for (let seat = 1; seat <= setup.playerCount; seat++) {
+  const randomOption = document.createElement("option");
+  randomOption.value = "0";
+  randomOption.textContent = "\u968F\u673A";
+  humanSeat.append(randomOption);
+  for (let seat = 1; seat <= state.clocktowerSetup.playerCount; seat += 1) {
     const option = document.createElement("option");
     option.value = String(seat);
-    option.textContent = seat + "\u53F7";
+    option.textContent = String(seat) + "\u53F7";
     humanSeat.append(option);
   }
-  humanSeat.value = String(setup.humanSeat <= setup.playerCount ? setup.humanSeat : 0);
-  humanSeat.disabled = !setup.includeHuman;
+  humanSeat.value = String(state.clocktowerSetup.humanSeat <= state.clocktowerSetup.playerCount ? state.clocktowerSetup.humanSeat : 0);
+  humanSeat.disabled = !state.clocktowerSetup.includeHuman;
   countSelect.onchange = async () => {
-    setup.playerCount = Number(countSelect.value);
-    if (setup.humanSeat > setup.playerCount) setup.humanSeat = 0;
-    await persistFogCouncilSettings();
-    renderFogCouncilSettings();
-    if (state.activeMode === "fog_council" && !activeFogCouncilGame()) renderMode();
+    const value = Number(countSelect.value);
+    state.clocktowerSetup.playerCount = value;
+    if (state.clocktowerSetup.humanSeat > value) state.clocktowerSetup.humanSeat = 0;
+    await persistClocktowerSettings();
+    renderClocktowerSettings();
+    if (state.activeMode === "clocktower" && !activeClocktowerGame()) renderMode();
+  };
+  scriptSelect.onchange = async () => {
+    state.clocktowerSetup.scriptId = "trouble-brewing";
+    await persistClocktowerSettings();
+  };
+  setupMode.onchange = async () => {
+    state.clocktowerSetup.setupMode = setupMode.value;
+    await persistClocktowerSettings();
+    if (state.activeMode === "clocktower" && !activeClocktowerGame()) renderMode();
   };
   humanToggle.onchange = async () => {
-    setup.includeHuman = humanToggle.checked;
-    if (!setup.includeHuman) setup.humanSeat = 0;
-    await persistFogCouncilSettings();
-    renderFogCouncilSettings();
-    if (state.activeMode === "fog_council" && !activeFogCouncilGame()) renderMode();
+    state.clocktowerSetup.includeHuman = humanToggle.checked;
+    if (!humanToggle.checked) state.clocktowerSetup.humanSeat = 0;
+    await persistClocktowerSettings();
+    renderClocktowerSettings();
+    if (state.activeMode === "clocktower" && !activeClocktowerGame()) renderMode();
   };
   humanSeat.onchange = async () => {
-    setup.humanSeat = Number(humanSeat.value);
-    await persistFogCouncilSettings();
+    state.clocktowerSetup.humanSeat = Number(humanSeat.value);
+    await persistClocktowerSettings();
   };
   container.replaceChildren();
-  const selected = state.settings.fogCouncilProviders;
-  const ordered = [
-    ...selected.map((id2) => providerById[id2]).filter(Boolean),
-    ...PROVIDERS.filter((provider) => !selected.includes(provider.id))
-  ];
+  const selected = state.settings.clocktowerProviders;
+  const ordered = [...selected.map((providerId) => providerById[providerId]).filter(Boolean), ...PROVIDERS.filter((provider) => !selected.includes(provider.id))];
   for (const provider of ordered) {
     const { row, checkbox } = providerOptionBase(provider.id, selected.includes(provider.id));
     checkbox.addEventListener("change", async () => {
-      const next = [...state.settings.fogCouncilProviders];
+      const next = [...state.settings.clocktowerProviders];
       if (checkbox.checked && !next.includes(provider.id)) next.push(provider.id);
       if (!checkbox.checked) {
         const index = next.indexOf(provider.id);
         if (index >= 0) next.splice(index, 1);
       }
-      state.settings.fogCouncilProviders = next;
-      await persistFogCouncilSettings();
-      renderFogCouncilSettings();
-      if (state.activeMode === "fog_council" && !activeFogCouncilGame()) renderMode();
+      state.settings.clocktowerProviders = next;
+      await persistClocktowerSettings();
+      renderClocktowerSettings();
+      if (state.activeMode === "clocktower" && !activeClocktowerGame()) renderMode();
     });
     if (provider.enabled && checkbox.checked) {
-      const index = selected.indexOf(provider.id);
-      for (const [label, step] of [["\u2191", -1], ["\u2193", 1]]) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "order-button";
-        button.textContent = label;
-        button.disabled = index + step < 0 || index + step >= selected.length;
-        button.addEventListener("click", async () => {
-          const next = [...state.settings.fogCouncilProviders];
-          [next[index], next[index + step]] = [next[index + step], next[index]];
-          state.settings.fogCouncilProviders = next;
-          await persistFogCouncilSettings();
-          renderFogCouncilSettings();
-        });
-        row.append(button);
-      }
+      const index = state.settings.clocktowerProviders.indexOf(provider.id);
+      const up = document.createElement("button");
+      up.type = "button";
+      up.className = "order-button";
+      up.textContent = "\u2191";
+      up.title = "\u63D0\u524D\u5EA7\u4F4D\u987A\u5E8F";
+      up.disabled = index <= 0;
+      up.addEventListener("click", async () => {
+        if (index <= 0) return;
+        const next = [...state.settings.clocktowerProviders];
+        [next[index - 1], next[index]] = [next[index], next[index - 1]];
+        state.settings.clocktowerProviders = next;
+        await persistClocktowerSettings();
+        renderClocktowerSettings();
+      });
+      const down = document.createElement("button");
+      down.type = "button";
+      down.className = "order-button";
+      down.textContent = "\u2193";
+      down.title = "\u5EF6\u540E\u5EA7\u4F4D\u987A\u5E8F";
+      down.disabled = index >= state.settings.clocktowerProviders.length - 1;
+      down.addEventListener("click", async () => {
+        if (index < 0 || index >= state.settings.clocktowerProviders.length - 1) return;
+        const next = [...state.settings.clocktowerProviders];
+        [next[index + 1], next[index]] = [next[index], next[index + 1]];
+        state.settings.clocktowerProviders = next;
+        await persistClocktowerSettings();
+        renderClocktowerSettings();
+      });
+      row.append(up, down);
     }
     container.append(row);
   }
 }
 function renderSettings() {
-  const acceleration = el("replyAcceleration");
-  acceleration.checked = state.settings.replyAcceleration !== false;
+  const acceleration = el("replyAccelerationMode");
+  acceleration.value = state.settings.replyAccelerationMode ?? "background_pump";
   acceleration.onchange = () => {
-    state.settings.replyAcceleration = acceleration.checked;
+    state.settings.replyAccelerationMode = acceleration.value;
     void saveState(state).catch((error) => showComposerError(error instanceof Error ? error.message : String(error)));
   };
   renderQaSettings();
   renderSequentialSettings("roundtable", "roundtableProviderSettings");
   renderWerewolfSettings();
-  renderFogCouncilSettings();
+  renderClocktowerSettings();
 }
 function actionIconButton(icon, title) {
   const button = document.createElement("button");
@@ -5789,6 +6344,7 @@ function renderExpertPresets() {
       state.expertPresets = state.expertPresets.filter((item) => item.id !== preset.id);
       for (const provider of PROVIDERS) {
         if (state.settings.expertPresetByProvider[provider.id] === preset.id) delete state.settings.expertPresetByProvider[provider.id];
+        if (state.settings.qaPresetByProvider[provider.id] === preset.id) delete state.settings.qaPresetByProvider[provider.id];
       }
       syncBlankExpertSessionAssignments();
       await saveState(state);
@@ -5857,6 +6413,117 @@ async function importExpertPresets(file) {
     showComposerError(error instanceof Error ? `\u5BFC\u5165\u5931\u8D25\uFF1A${error.message}` : "\u5BFC\u5165\u5931\u8D25\uFF1A\u672A\u77E5\u9519\u8BEF");
   }
 }
+var qiniuPresetBusy = false;
+function showQiniuPresetStatus(message, error = false) {
+  const status = el("qiniuPresetStatus");
+  status.textContent = message;
+  status.classList.toggle("error", error);
+}
+function updateQiniuPresetConfigState() {
+  const configured = Boolean(el("qiniuEndpoint").value.trim() && el("qiniuAccessKey").value.trim() && el("qiniuSecretKey").value.trim());
+  el("qiniuPresetConfigState").textContent = configured ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E";
+}
+async function loadQiniuPresetFields() {
+  const [local, session] = await Promise.all([
+    chrome.storage.local.get(CLOUD_CONFIG_STORAGE_KEY),
+    chrome.storage.session.get(CLOUD_SECRET_SESSION_KEY)
+  ]);
+  const data = local[CLOUD_CONFIG_STORAGE_KEY] ?? {};
+  el("qiniuEndpoint").value = data.endpoint ?? "";
+  el("qiniuAccessKey").value = data.accessKey ?? "";
+  el("qiniuSecretKey").value = typeof session[CLOUD_SECRET_SESSION_KEY] === "string" ? session[CLOUD_SECRET_SESSION_KEY] : "";
+  updateQiniuPresetConfigState();
+}
+async function persistQiniuPresetFields() {
+  const endpoint = el("qiniuEndpoint").value.trim();
+  const accessKey = el("qiniuAccessKey").value.trim();
+  const secretKey = el("qiniuSecretKey").value.trim();
+  parseQiniuEndpoint(endpoint);
+  if (!accessKey) throw new Error("\u8BF7\u586B\u5199\u4E03\u725B\u4E91 AccessKey\u3002");
+  await Promise.all([
+    chrome.storage.local.set({ [CLOUD_CONFIG_STORAGE_KEY]: { endpoint, accessKey } }),
+    secretKey ? chrome.storage.session.set({ [CLOUD_SECRET_SESSION_KEY]: secretKey }) : chrome.storage.session.remove(CLOUD_SECRET_SESSION_KEY)
+  ]);
+  updateQiniuPresetConfigState();
+  return { endpoint, accessKey, secretKey };
+}
+function setQiniuPresetBusy(busy) {
+  qiniuPresetBusy = busy;
+  for (const buttonId of [
+    "cloudUploadExpertsButton",
+    "cloudDownloadExpertsButton",
+    "qiniuSaveConfig",
+    "qiniuUpload",
+    "qiniuDownloadMerge",
+    "qiniuDownloadReplace"
+  ]) {
+    el(buttonId).disabled = busy;
+  }
+}
+async function saveQiniuPresetConfig() {
+  if (qiniuPresetBusy) return;
+  try {
+    setQiniuPresetBusy(true);
+    await persistQiniuPresetFields();
+    showQiniuPresetStatus("\u4E03\u725B\u4E91\u914D\u7F6E\u5DF2\u4FDD\u5B58\u5728\u5F53\u524D\u6D4F\u89C8\u5668\u3002");
+  } catch (error) {
+    showQiniuPresetStatus(error instanceof Error ? error.message : "\u4FDD\u5B58\u914D\u7F6E\u5931\u8D25\u3002", true);
+  } finally {
+    setQiniuPresetBusy(false);
+  }
+}
+async function runQiniuPresetAction(action) {
+  if (qiniuPresetBusy) return;
+  const panel = el("qiniuPresetPanel");
+  const endpoint = el("qiniuEndpoint").value.trim();
+  const accessKey = el("qiniuAccessKey").value.trim();
+  const secretKey = el("qiniuSecretKey").value.trim();
+  if (!endpoint || !accessKey || !secretKey) {
+    panel.open = true;
+    showQiniuPresetStatus("\u8BF7\u5148\u586B\u5199\u5B58\u50A8\u6876 HTTPS \u5730\u5740\u3001AccessKey \u548C SecretKey\u3002", true);
+    return;
+  }
+  if (action === "upload" && !window.confirm("\u4E0A\u4F20\u5C06\u8986\u76D6\u4E91\u7AEF multi-ai-roundtable/experts.json\uFF0C\u7EE7\u7EED\u5417\uFF1F")) return;
+  if (action === "replace" && !window.confirm("\u5C06\u4EE5\u4E91\u7AEF\u9884\u8BBE\u66FF\u6362\u672C\u5730\u9884\u8BBE\u5217\u8868\u3002\u4E91\u7AEF\u4E0D\u5B58\u5728\u7684\u672C\u5730\u9884\u8BBE\u4F1A\u88AB\u5220\u9664\uFF0C\u7EE7\u7EED\u5417\uFF1F")) return;
+  setQiniuPresetBusy(true);
+  panel.open = true;
+  showQiniuPresetStatus(action === "upload" ? "\u6B63\u5728\u4E0A\u4F20\u9884\u8BBE\u2026" : "\u6B63\u5728\u4E0B\u8F7D\u9884\u8BBE\u2026");
+  try {
+    const config = await persistQiniuPresetFields();
+    if (action === "upload") {
+      const latest = await loadState();
+      if (!latest.expertPresets.length) throw new Error("\u672C\u5730\u8FD8\u6CA1\u6709\u53EF\u5907\u4EFD\u7684\u9884\u8BBE\u3002");
+      await uploadExpertPresetsJson(config, JSON.stringify(buildExpertPresetTransferFile(latest.expertPresets)));
+      showQiniuPresetStatus(`\u5DF2\u4E0A\u4F20 ${latest.expertPresets.length} \u6761\u9884\u8BBE\uFF0C\u4E91\u7AEF\u540C\u8DEF\u5F84\u65E7\u5907\u4EFD\u5DF2\u8986\u76D6\u3002`);
+      return;
+    }
+    const incoming = parseExpertPresetTransferFile(await downloadExpertPresetsJson(config));
+    await refreshStateFromStorage();
+    const merged = action === "replace" ? replaceExpertPresets(state.expertPresets, incoming, Date.now(), () => id("expert")) : mergeExpertPresets(state.expertPresets, incoming, Date.now(), () => id("expert"));
+    state.expertPresets = merged.presets;
+    if (action === "replace") {
+      const validIds = new Set(state.expertPresets.map((preset) => preset.id));
+      for (const provider of PROVIDERS) {
+        if (state.settings.expertPresetByProvider[provider.id] && !validIds.has(state.settings.expertPresetByProvider[provider.id])) {
+          delete state.settings.expertPresetByProvider[provider.id];
+        }
+        if (state.settings.qaPresetByProvider[provider.id] && !validIds.has(state.settings.qaPresetByProvider[provider.id])) {
+          delete state.settings.qaPresetByProvider[provider.id];
+        }
+      }
+    }
+    syncBlankExpertSessionAssignments();
+    await saveState(state);
+    closeExpertEditor();
+    renderExpertPresets();
+    renderSettings();
+    showQiniuPresetStatus(action === "replace" ? `\u4E91\u7AEF\u66FF\u6362\u5B8C\u6210\uFF1A\u5F53\u524D ${state.expertPresets.length} \u6761\u9884\u8BBE\u3002` : `\u4E91\u7AEF\u5408\u5E76\u5B8C\u6210\uFF1A\u65B0\u589E ${merged.added}\u3001\u66F4\u65B0 ${merged.updated}\u3001\u672A\u53D8 ${merged.unchanged}\u3002`);
+  } catch (error) {
+    showQiniuPresetStatus(error instanceof Error ? error.message : "\u4E03\u725B\u4E91\u64CD\u4F5C\u5931\u8D25\u3002", true);
+  } finally {
+    setQiniuPresetBusy(false);
+  }
+}
 function sessionMarkdown(session) {
   const lines = [`# ${session.title}`, "", `- \u7C7B\u578B\uFF1A${modeLabel(session.mode)}`, `- \u521B\u5EFA\u65F6\u95F4\uFF1A${new Date(session.createdAt).toLocaleString()}`, `- \u66F4\u65B0\u65F6\u95F4\uFF1A${new Date(session.updatedAt).toLocaleString()}`];
   if (session.mode === "expert") {
@@ -5922,37 +6589,50 @@ function exportWerewolfGame(game) {
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1e3);
 }
-function fogCouncilGameMarkdown(game) {
+function clocktowerGameMarkdown(game) {
+  const human = clocktowerHumanPlayer(game);
   const lines = [
-    "# " + game.title,
+    `# ${game.title}`,
     "",
-    "- \u7C7B\u578B\uFF1AAI \u8FF7\u96FE\u8BAE\u4F1A",
-    "- \u72B6\u6001\uFF1A" + fogCouncilStatusLabel(game),
-    "- \u6E05\u6670\u9635\u8425\uFF1A" + game.clarityScore + " \u5206",
-    "- \u8FF7\u96FE\u9635\u8425\uFF1A" + game.mistScore + " \u5206",
-    "- \u521B\u5EFA\u65F6\u95F4\uFF1A" + new Date(game.createdAt).toLocaleString(),
-    ""
+    "- \u7C7B\u578B\uFF1A\u8FF7\u96FE\u8BAE\u4F1A",
+    "- \u5267\u672C\uFF1A\u7ECF\u5178\u8EAB\u4EFD\u5267\u672C",
+    `- \u4EBA\u6570\uFF1A${game.rulesetSnapshot.playerCount}`,
+    `- \u72B6\u6001\uFF1A${clocktowerStatusLabel(game)}`,
+    `- \u521B\u5EFA\u65F6\u95F4\uFF1A${new Date(game.createdAt).toLocaleString()}`,
+    `- \u66F4\u65B0\u65F6\u95F4\uFF1A${new Date(game.updatedAt).toLocaleString()}`
   ];
-  if (game.humanSeat) {
-    const human = game.players.find((p) => p.seat === game.humanSeat);
-    lines.push("- \u6211\u7684\u8EAB\u4EFD\uFF1A" + COUNCIL_ROLE_BY_ID[human.role].name);
+  if (human) {
+    lines.push(`- \u4F60\u7684\u5EA7\u4F4D\uFF1A${human.seat}\u53F7`);
+    lines.push(`- \u4F60\u8BA4\u77E5\u7684\u89D2\u8272\uFF1A${clocktowerRoleById[human.perceivedCharacter].name}`);
   }
   if (game.status === "ended") {
-    lines.push("- \u83B7\u80DC\u9635\u8425\uFF1A" + (game.winner === "clarity" ? "\u6E05\u6670" : "\u8FF7\u96FE"));
-    lines.push("- \u6700\u7EC8\u8EAB\u4EFD\uFF1A" + game.players.map((p) => p.seat + "\u53F7 " + COUNCIL_ROLE_BY_ID[p.role].name).join("\uFF1B"));
+    lines.push(`- \u83B7\u80DC\u9635\u8425\uFF1A${game.winner === "good" ? "\u5584\u826F" : "\u90AA\u6076"}`);
+    lines.push(`- \u80DC\u8D1F\u539F\u56E0\uFF1A${game.winnerReason ?? "\u672A\u8BB0\u5F55"}`);
+    lines.push(`- \u6700\u7EC8\u89D2\u8272\uFF1A${[...game.players].sort((a, b) => a.seat - b.seat).map((player) => `${player.seat}\u53F7 ${clocktowerRoleById[player.trueCharacter].name}`).join("\uFF1B")}`);
   }
-  lines.push("", "## \u516C\u5F00\u4E0E\u672C\u4EBA\u53EF\u89C1\u7684\u8BB0\u5F55", "");
-  for (const event of fogCouncilVisibleEvents(game)) {
-    lines.push("### " + (event.actorSeat ? event.actorSeat + "\u53F7" : "\u4E3B\u6301\u4EBA"), "", event.text, "");
+  lines.push("", "## \u6E38\u620F\u8BB0\u5F55", "");
+  const events = game.status === "ended" ? game.events : clocktowerVisibleEvents(game);
+  for (const event of events) {
+    if (!event.content || event.type === "phase") continue;
+    if (game.status !== "ended" && event.visibility.type === "storyteller") continue;
+    const author = event.authorSeat ? `${event.authorSeat}\u53F7` : event.visibility.type === "private" ? "\u79C1\u5BC6\u4FE1\u606F" : event.visibility.type === "storyteller" ? "\u8BF4\u4E66\u4EBA\uFF08\u9690\u85CF\u8BB0\u5F55\uFF09" : "\u8BF4\u4E66\u4EBA";
+    lines.push(`### ${author}`, "", event.content, "");
+  }
+  if (game.status === "ended" && game.storytellerDecisions.length) {
+    lines.push("## Storyteller \u88C1\u91CF\u8BB0\u5F55", "");
+    for (const decision of game.storytellerDecisions) {
+      lines.push(`- ${decision.kind}\uFF1A${decision.selected}\uFF08${decision.reason}\uFF09`);
+    }
+    lines.push("");
   }
   return lines.join("\n").trimEnd() + "\n";
 }
-function exportFogCouncilGame(game) {
-  const blob = new Blob([fogCouncilGameMarkdown(game)], { type: "text/markdown;charset=utf-8" });
+function exportClocktowerGame(game) {
+  const blob = new Blob([clocktowerGameMarkdown(game)], { type: "text/markdown;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "fog-council-" + game.round + ".md";
+  anchor.download = `${game.title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 48) || "clocktower"}.md`;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
@@ -5972,14 +6652,14 @@ async function deleteWerewolfGame(game) {
     showComposerError(error instanceof Error ? error.message : String(error));
   }
 }
-async function deleteFogCouncilGame(game) {
-  if (game.status === "running" || game.pendingTurn) {
-    showComposerError("\u8BF7\u5148\u4E2D\u65AD\u5E76\u786E\u8BA4\u672C\u5C40\u6CA1\u6709\u5F85\u5B8C\u6210\u7F51\u9875\u64CD\u4F5C");
+async function deleteClocktowerGame(game) {
+  if (game.status === "running" || game.status === "waiting_human" || game.pendingTurn) {
+    showComposerError("\u8BF7\u5148\u4E2D\u65AD\u6B63\u5728\u8FD0\u884C\u7684\u8FF7\u96FE\u8BAE\u4F1A\u5BF9\u5C40");
     return;
   }
-  if (!window.confirm("\u5220\u9664\u201C" + game.title + "\u201D\uFF1F\u6B64\u64CD\u4F5C\u53EA\u5220\u9664\u672C\u5730\u8BB0\u5F55\u3002")) return;
+  if (!window.confirm(`\u5220\u9664\u8FF7\u96FE\u8BAE\u4F1A\u5BF9\u5C40\u201C${game.title}\u201D\uFF1F\u6B64\u64CD\u4F5C\u53EA\u5220\u9664\u6269\u5C55\u672C\u5730\u8BB0\u5F55\u3002`)) return;
   try {
-    await runtimeMessage({ type: "DELETE_FOG_COUNCIL_GAME", gameId: game.id });
+    await runtimeMessage({ type: "DELETE_CLOCKTOWER_GAME", gameId: game.id });
     await refreshStateFromStorage();
     renderHistory();
   } catch (error) {
@@ -6079,45 +6759,47 @@ function renderHistory() {
     gameSection.append(card);
   }
   body.append(gameSection);
-  const councilSection = document.createElement("section");
-  councilSection.className = "history-section";
-  const councilHeading = document.createElement("h3");
-  councilHeading.textContent = "AI \u8FF7\u96FE\u8BAE\u4F1A";
-  councilSection.append(councilHeading);
-  const councilGames = [...state.fogCouncilGames].sort((a, b) => b.updatedAt - a.updatedAt);
-  if (!councilGames.length) {
+  const clockSection = document.createElement("section");
+  clockSection.className = "history-section";
+  const clockHeading = document.createElement("h3");
+  clockHeading.textContent = "\u8FF7\u96FE\u8BAE\u4F1A";
+  clockSection.append(clockHeading);
+  const clockGames = [...state.clocktowerGames].sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!clockGames.length) {
     const empty = document.createElement("p");
     empty.className = "history-empty";
     empty.textContent = "\u6682\u65E0\u5BF9\u5C40";
-    councilSection.append(empty);
+    clockSection.append(empty);
   }
-  for (const game of councilGames) {
+  for (const game of clockGames) {
     const card = document.createElement("div");
-    card.className = "history-card " + (state.activeFogCouncilGameId === game.id ? "active" : "");
+    card.className = `history-card ${state.activeClocktowerGameId === game.id ? "active" : ""}`;
     const title = document.createElement("button");
     title.type = "button";
     title.className = "history-title";
-    title.textContent = game.title + " \xB7 " + fogCouncilStatusLabel(game);
+    title.textContent = `${game.title} \xB7 ${clocktowerStatusLabel(game)}`;
     title.addEventListener("click", async () => {
       try {
-        await runtimeMessage({ type: "SET_ACTIVE_FOG_COUNCIL_GAME", gameId: game.id });
-        state.activeMode = "fog_council";
-        state.activeFogCouncilGameId = game.id;
+        await runtimeMessage({ type: "SET_ACTIVE_CLOCKTOWER_GAME", gameId: game.id });
+        state.activeMode = "clocktower";
+        state.activeClocktowerGameId = game.id;
         el("historyOverlay").classList.add("hidden");
+        clocktowerSelectedTargets = [];
         clearComposer();
         renderMode();
+        await saveState(state);
       } catch (error) {
         showComposerError(error instanceof Error ? error.message : String(error));
       }
     });
     const exportButton = actionIconButton(ICON_EXPORT, "\u5BFC\u51FA\u4E3A Markdown");
-    exportButton.addEventListener("click", () => exportFogCouncilGame(game));
+    exportButton.addEventListener("click", () => exportClocktowerGame(game));
     const deleteButton = actionIconButton(ICON_DELETE, "\u5220\u9664\u5BF9\u5C40");
-    deleteButton.addEventListener("click", () => void deleteFogCouncilGame(game));
+    deleteButton.addEventListener("click", () => void deleteClocktowerGame(game));
     card.append(title, exportButton, deleteButton);
-    councilSection.append(card);
+    clockSection.append(card);
   }
-  body.append(councilSection);
+  body.append(clockSection);
 }
 async function newConversation() {
   const mode = state.activeMode;
@@ -6134,12 +6816,13 @@ async function newConversation() {
     }
     return;
   }
-  if (mode === "fog_council") {
-    const game = activeFogCouncilGame();
-    if (game?.status === "running") return showComposerError("\u8BF7\u5148\u4E2D\u65AD\u6B63\u5728\u8FDB\u884C\u7684\u8BAE\u4F1A");
+  if (mode === "clocktower") {
+    const game = activeClocktowerGame();
+    if (game?.status === "running" || game?.status === "waiting_human") return showComposerError("\u8BF7\u5148\u4E2D\u65AD\u5F53\u524D\u8FF7\u96FE\u8BAE\u4F1A\u5BF9\u5C40\u518D\u65B0\u5F00\u4E00\u5C40");
     try {
-      await runtimeMessage({ type: "SET_ACTIVE_FOG_COUNCIL_GAME" });
-      state.activeFogCouncilGameId = void 0;
+      await runtimeMessage({ type: "SET_ACTIVE_CLOCKTOWER_GAME" });
+      state.activeClocktowerGameId = void 0;
+      clocktowerSelectedTargets = [];
       clearComposer();
       renderMode();
     } catch (error) {
@@ -6150,7 +6833,6 @@ async function newConversation() {
   const current = activeSession();
   if (current.execution?.status === "running") return showComposerError("\u8BF7\u5148\u4E2D\u65AD\u5F53\u524D\u5FAA\u73AF\u518D\u65B0\u5EFA\u4F1A\u8BDD");
   createSession(mode);
-  interruptRequested = false;
   clearComposer();
   renderMode();
   await saveState(state);
@@ -6197,20 +6879,31 @@ function wireEvents() {
   el("expertPresetButton").addEventListener("click", () => {
     renderExpertPresets();
     openOverlay("expertOverlay");
+    void loadQiniuPresetFields().catch(() => showQiniuPresetStatus("\u8BFB\u53D6\u672C\u5730\u4E03\u725B\u4E91\u914D\u7F6E\u5931\u8D25\u3002", true));
   });
   el("historyButton").addEventListener("click", () => {
     renderHistory();
     openOverlay("historyOverlay");
   });
-  el("fogCouncilScriptButton").addEventListener("click", () => {
-    renderFogCouncilScript();
-    openOverlay("fogCouncilScriptOverlay");
+  el("clocktowerScriptButton").addEventListener("click", () => {
+    renderClocktowerScript();
+    openOverlay("clocktowerScriptOverlay");
   });
   wireOverlay("settingsOverlay", "closeSettingsButton");
   wireOverlay("expertOverlay", "closeExpertButton");
   wireOverlay("historyOverlay", "closeHistoryButton");
-  wireOverlay("fogCouncilScriptOverlay", "closeFogCouncilScriptButton");
+  wireOverlay("clocktowerScriptOverlay", "closeClocktowerScriptButton");
   el("newExpertButton").addEventListener("click", () => openExpertEditor());
+  el("addBuiltinExpertsButton").addEventListener("click", () => {
+    const present = new Set(state.expertPresets.map((preset) => preset.id));
+    const added = BUILTIN_EXPERT_PRESETS.filter((preset) => !present.has(preset.id));
+    state.expertPresets.push(...structuredClone(added));
+    void saveState(state).then(() => {
+      renderExpertPresets();
+      if (state.activeMode === "expert") renderMessages();
+      showComposerError(added.length ? `\u5DF2\u6DFB\u52A0 ${added.length} \u4E2A\u4E13\u5BB6\u6A21\u677F` : "\u7CBE\u9009\u6A21\u677F\u5DF2\u5168\u90E8\u5B58\u5728");
+    }).catch((error) => showComposerError(error.message));
+  });
   el("saveExpertButton").addEventListener("click", () => void saveExpertPreset());
   el("cancelExpertButton").addEventListener("click", closeExpertEditor);
   const expertImportInput = el("expertImportInput");
@@ -6219,6 +6912,15 @@ function wireEvents() {
     expertImportInput.click();
   });
   el("exportExpertsButton").addEventListener("click", exportExpertPresets);
+  el("cloudUploadExpertsButton").addEventListener("click", () => void runQiniuPresetAction("upload"));
+  el("cloudDownloadExpertsButton").addEventListener("click", () => void runQiniuPresetAction("merge"));
+  el("qiniuSaveConfig").addEventListener("click", () => void saveQiniuPresetConfig());
+  el("qiniuUpload").addEventListener("click", () => void runQiniuPresetAction("upload"));
+  el("qiniuDownloadMerge").addEventListener("click", () => void runQiniuPresetAction("merge"));
+  el("qiniuDownloadReplace").addEventListener("click", () => void runQiniuPresetAction("replace"));
+  for (const id2 of ["qiniuEndpoint", "qiniuAccessKey", "qiniuSecretKey"]) {
+    el(id2).addEventListener("input", updateQiniuPresetConfigState);
+  }
   expertImportInput.addEventListener("change", () => {
     const file = expertImportInput.files?.[0];
     expertImportInput.value = "";
@@ -6235,7 +6937,7 @@ function wireEvents() {
   messageInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && state.activeMode === "qa") {
       event.preventDefault();
-      void handleQaSend();
+      if (!Object.keys(activeSession().pendingOperations ?? {}).length) void handleQaSend();
       return;
     }
     if (event.key === "Enter" && !event.shiftKey && state.activeMode === "werewolf" && humanTextTurn(activeWerewolfGame()?.pendingHumanAction)) {
@@ -6243,23 +6945,32 @@ function wireEvents() {
       void handleWerewolfHumanTextSend();
       return;
     }
-    if (event.key === "Enter" && !event.shiftKey && state.activeMode === "fog_council" && fogCouncilHumanTextTurn(activeFogCouncilGame()?.pendingHumanAction)) {
+    if (event.key === "Enter" && !event.shiftKey && state.activeMode === "clocktower" && clocktowerHumanTextTurn(activeClocktowerGame()?.pendingHumanAction)) {
       event.preventDefault();
-      void handleFogCouncilHumanTextSend();
+      void handleClocktowerHumanTextSend();
     }
   });
   qaSendButton.addEventListener("click", () => void handleQaSend());
   roundActionButton.addEventListener("click", () => void handleSequentialAction());
+  el("summaryActionButton").addEventListener("click", () => {
+    if (!isConversationMode(state.activeMode)) return;
+    const sessionId = activeSession().id;
+    const provider = el("summaryProviderSelect").value;
+    if (!providerById[provider]) return showComposerError("\u8BF7\u9009\u62E9\u6C47\u603B\u6A21\u578B");
+    void runtimeMessage({ type: "SUMMARIZE_SESSION", sessionId, provider }).then(() => showComposerError("\u5DF2\u63D0\u4EA4\u6C47\u603B\u8BF7\u6C42")).catch((error) => showComposerError(error.message));
+  });
   el("werewolfActionButton").addEventListener("click", () => void handleWerewolfAction());
   el("werewolfHumanSendButton").addEventListener("click", () => void handleWerewolfHumanTextSend());
-  el("fogCouncilActionButton").addEventListener("click", () => void handleFogCouncilAction());
-  el("fogCouncilHumanSendButton").addEventListener("click", () => void handleFogCouncilHumanTextSend());
+  el("clocktowerActionButton").addEventListener("click", () => void handleClocktowerAction());
+  el("clocktowerHumanSendButton").addEventListener("click", () => void handleClocktowerHumanTextSend());
   roundRange.addEventListener("input", () => {
+    roundNumber.value = roundRange.value;
+  });
+  roundRange.addEventListener("change", () => {
     const session = activeSession();
     if (!isSequentialMode(session.mode)) return;
     session.rounds = Number(roundRange.value);
     if (session.execution) session.execution.targetRounds = session.rounds;
-    roundNumber.value = roundRange.value;
     touchSession(session);
     void saveState(state);
   });
@@ -6274,11 +6985,21 @@ function wireEvents() {
     touchSession(session);
     void saveState(state);
   });
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.source !== "background" || message.type !== "STREAM_DELTA") return;
+    const owner = state.conversations.find((session) => session.pendingOperations?.[message.operationId]);
+    const operation = owner?.pendingOperations?.[message.operationId];
+    if (!owner || !operation || operation.provider !== message.provider) return;
+    const text2 = typeof message.text === "string" ? message.text : "";
+    liveStreamText.set(operation.messageId, text2);
+    if (isActiveConversation(owner)) updateStreamingBubbleInPlace(operation.messageId, text2);
+  });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "local" && changes[STORAGE_KEY]) void refreshStateFromStorage();
   });
 }
 async function init() {
+  document.body.classList.toggle("standalone", new URLSearchParams(location.search).get("standalone") === "1");
   state = await loadState();
   uiBaseline = structuredClone(state);
   ensureActiveSession("qa");

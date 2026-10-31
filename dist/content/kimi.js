@@ -200,8 +200,9 @@
   function responseCompletionReady(options) {
     if (options.generationActive) return false;
     const quietFor = Date.now() - options.lastChangeAt;
-    if ((options.explicitComplete || replyAccelerationEnabled && options.observedGenerationComplete) && quietFor >= 1e3) return true;
-    const fallbackMs = document.visibilityState === "hidden" ? options.hiddenFallbackMs ?? 2e4 : options.visibleFallbackMs ?? 15e3;
+    if (options.explicitComplete && quietFor >= 1500) return true;
+    if (options.observedGenerationComplete && quietFor >= 2500) return true;
+    const fallbackMs = document.visibilityState === "hidden" ? options.hiddenFallbackMs ?? 15e3 : options.visibleFallbackMs ?? 12e3;
     return quietFor >= fallbackMs;
   }
   function dataUrlToFile(attachment) {

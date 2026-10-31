@@ -1,14 +1,15 @@
 import { providerById } from './shared/providers';
 import { loadState, STORAGE_KEY } from './shared/storage';
-import type { ComposerPayload, PersistedState, ProviderEvent, ProviderId } from './shared/types';
+import type { ComposerPayload, ConversationMode, PersistedState, ProviderEvent, ProviderId } from './shared/types';
 import { createBackgroundOrchestrator } from './background/orchestrator';
+import { stashPayloadAttachments, cleanupOrphanAttachments } from './background/attachments';
 import { updatePageFramePump } from './background/page-liveness';
 import { createReplyForeground } from './background/reply-foreground';
 import { createPrivateGameTab, forgetPrivateGameTab, isPrivateGameTab, preparePrivateGamePage, releaseInactivePrivateGamePages } from './background/private-game-pages';
 import { createWerewolfEngine } from './background/werewolf-engine';
 import type { WerewolfGameSession, WerewolfPendingTurn } from './game/werewolf/types';
-import { createFogCouncilEngine } from './background/fog-council-engine';
-import type { FogCouncilGameSession, FogCouncilPendingTurn } from './game/fog-council/session';
+import { createClocktowerEngine } from './background/clocktower-engine';
+import type { ClocktowerGameSession, ClocktowerPendingTurn } from './game/clocktower/types';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
 
@@ -29,6 +30,7 @@ const COMMAND_QUEUE_KEY = 'multiAiRoundtableCommandQueueV1';
 const COMMAND_ALARM_PREFIX = 'multi-ai-command:';
 const MANAGED_TABS_KEY = 'multiAiRoundtableManagedTabsV1';
 const MANAGED_GROUPS_KEY = 'multiAiRoundtableManagedGroupsV1';
+const QA_UNGROUPED_TABS_KEY = 'multiAiRoundtableQaUngroupedTabsV1';
 const ISOLATION_MIGRATION_KEY = 'multiAiRoundtableIsolationMigrationV1';
 const PROVIDER_WATCHDOG_ALARM = 'multi-ai-provider-watchdog';
 const lastProviderActivity = new Map<string, number>();
@@ -41,6 +43,7 @@ const framePumpTabs = new Map<number, ProviderId>();
 const framePumpQueues = new Map<number, Promise<void>>();
 const foregroundReplies = createReplyForeground(isManagedTab);
 let replyAccelerationEnabled = true;
+let lastReplyAccelerationMode: PersistedState['settings']['replyAccelerationMode'];
 let replyAccelerationTimer: number | undefined;
 let accelerationRunning = false;
 let watchdogSyncRunning = false;
@@ -55,11 +58,11 @@ function gamePendingByOperation(game: WerewolfGameSession, operationId: string):
   return gamePendingTurns(game).find((item) => item.operationId === operationId);
 }
 
-function fogCouncilPendingTurns(game: FogCouncilGameSession): FogCouncilPendingTurn[] {
+function clocktowerPendingTurns(game: ClocktowerGameSession): ClocktowerPendingTurn[] {
   return game.pendingTurn ? [game.pendingTurn] : [];
 }
 
-function fogCouncilPendingByOperation(game: FogCouncilGameSession, operationId: string): FogCouncilPendingTurn | undefined {
+function clocktowerPendingByOperation(game: ClocktowerGameSession, operationId: string): ClocktowerPendingTurn | undefined {
   return game.pendingTurn?.operationId === operationId ? game.pendingTurn : undefined;
 }
 
@@ -72,8 +75,8 @@ function queuePageFramePump(tabId: number, action: 'start' | 'stop'): Promise<vo
       const enabled = state.settings.replyAcceleration !== false || provider === 'doubao' || provider === 'minimax' || await isGameBoundTab(tabId);
       const conversationNeeds = enabled && state.conversations.some((session) => Object.values(session.pendingOperations ?? {}).some((operation) => (operation.provider === provider && operation.phase === 'preparing') || session.bindings[operation.provider]?.tabId === tabId));
       const gameNeeds = enabled && state.werewolfGames.some((game) => gamePendingTurns(game).some((operation) => (operation.provider === provider && operation.phase === 'preparing') || game.bindings[operation.playerId]?.tabId === tabId));
-      const fogCouncilNeeds = enabled && state.fogCouncilGames.some((game) => fogCouncilPendingTurns(game).some((operation) => (operation.provider === provider && operation.phase === 'preparing') || game.bindings[operation.playerId]?.tabId === tabId));
-      if (conversationNeeds || gameNeeds || fogCouncilNeeds) return;
+      const clocktowerNeeds = enabled && state.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((operation) => (operation.provider === provider && operation.phase === 'preparing') || game.bindings[operation.playerId]?.tabId === tabId));
+      if (conversationNeeds || gameNeeds || clocktowerNeeds) return;
       framePumpTabs.delete(tabId);
     }
     await updatePageFramePump(tabId, action);
@@ -93,11 +96,13 @@ async function startPageFramePump(tabId: number, provider: ProviderId): Promise<
 
 type BackgroundCommand =
   | { id: string; type: 'qa'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; createdAt: number }
-  | { id: string; type: 'sequential'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; targetRounds: number; createdAt: number };
+  | { id: string; type: 'sequential'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; targetRounds: number; createdAt: number }
+  | { id: string; type: 'summary'; sessionId: string; provider: ProviderId; createdAt: number };
 
 type BackgroundCommandInput =
   | { type: 'qa'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload }
-  | { type: 'sequential'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; targetRounds: number };
+  | { type: 'sequential'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; targetRounds: number }
+  | { type: 'summary'; sessionId: string; provider: ProviderId };
 
 let commandQueueTail: Promise<unknown> = Promise.resolve();
 let workerKeepAliveCount = 0;
@@ -132,7 +137,8 @@ async function mutateCommandQueue<T>(mutator: (queue: BackgroundCommand[]) => T 
 
 async function enqueueCommand(command: BackgroundCommandInput): Promise<string> {
   const id = `command-${crypto.randomUUID()}`;
-  const record = { ...command, id, createdAt: Date.now() } as BackgroundCommand;
+  const payloadSafe = 'payload' in command ? { ...command, payload: await stashPayloadAttachments(command.payload) } : command;
+  const record = { ...payloadSafe, id, createdAt: Date.now() } as BackgroundCommand;
   await mutateCommandQueue((queue) => { queue.push(record); });
   await chrome.alarms.create(`${COMMAND_ALARM_PREFIX}${id}`, { when: Date.now() + 100 });
   return id;
@@ -151,6 +157,8 @@ async function processQueuedCommand(commandId: string): Promise<void> {
         providers: command.providers,
         payload: command.payload
       });
+    } else if (command.type === 'summary') {
+      await orchestrator.summarizeSession(command.sessionId, command.provider);
     } else {
       await orchestrator.startSequential({
         sessionId: command.sessionId,
@@ -169,6 +177,22 @@ async function processQueuedCommand(commandId: string): Promise<void> {
     releaseWorker();
     commandInFlight.delete(commandId);
   }
+}
+
+async function cleanupUnusedAttachmentData(): Promise<void> {
+  const state = await loadState();
+  const saved = await chrome.storage.local.get(COMMAND_QUEUE_KEY);
+  const queued = (saved[COMMAND_QUEUE_KEY] as BackgroundCommand[] | undefined) ?? [];
+  const active = new Set<string>();
+  const record = (payload?: ComposerPayload) => {
+    for (const attachment of payload?.attachments ?? []) active.add(attachment.id);
+  };
+  for (const session of state.conversations) {
+    record(session.execution?.payload);
+    for (const operation of Object.values(session.pendingOperations ?? {})) record(operation.payload);
+  }
+  for (const command of queued) if ('payload' in command) record(command.payload);
+  await cleanupOrphanAttachments(active);
 }
 
 async function recoverQueuedCommands(): Promise<void> {
@@ -196,6 +220,25 @@ async function findProviderTab(provider: ProviderId, preferredTabId?: number): P
 
 type ManagedTabs = Record<string, ProviderId>;
 type ManagedGroups = Record<string, number>;
+type QaTabs = Record<string, true>;
+let qaTabTail: Promise<unknown> = Promise.resolve();
+
+async function isQaUngroupedTab(tabId: number): Promise<boolean> {
+  const saved = await chrome.storage.session.get(QA_UNGROUPED_TABS_KEY);
+  return Boolean((saved[QA_UNGROUPED_TABS_KEY] as QaTabs | undefined)?.[String(tabId)]);
+}
+
+async function markQaUngroupedTab(tabId: number, qa: boolean): Promise<void> {
+  const task = qaTabTail.then(async () => {
+    const saved = await chrome.storage.session.get(QA_UNGROUPED_TABS_KEY);
+    const tabs: QaTabs = (saved[QA_UNGROUPED_TABS_KEY] as QaTabs | undefined) ?? {};
+    if (qa) tabs[String(tabId)] = true;
+    else delete tabs[String(tabId)];
+    await chrome.storage.session.set({ [QA_UNGROUPED_TABS_KEY]: tabs });
+  });
+  qaTabTail = task.catch(() => undefined);
+  await task;
+}
 
 let managedTabsTail: Promise<unknown> = Promise.resolve();
 
@@ -225,6 +268,7 @@ async function unmarkManagedTab(tabId: number): Promise<void> {
   await mutateManagedTabs((tabs) => {
     delete tabs[String(tabId)];
   });
+  await markQaUngroupedTab(tabId, false);
   await forgetPrivateGameTab(tabId);
 }
 
@@ -236,7 +280,7 @@ async function isManagedTab(tabId: number, provider?: ProviderId): Promise<boole
   // Upgrade game bindings from the old session-only registry without opening
   // a duplicate conversation. Require the persisted URL and old placement.
   const state = await loadState();
-  const binding = [...state.werewolfGames, ...state.fogCouncilGames]
+  const binding = [...state.werewolfGames, ...state.clocktowerGames]
     .flatMap((game) => Object.values(game.bindings))
     .find((item) => item.tabId === tabId && (!provider || item.provider === provider));
   if (!binding?.conversationUrl) return false;
@@ -252,7 +296,7 @@ async function isManagedTab(tabId: number, provider?: ProviderId): Promise<boole
 async function isGameBoundTab(tabId: number): Promise<boolean> {
   if (await isPrivateGameTab(tabId)) return true;
   const state = await loadState();
-  return [...state.werewolfGames, ...state.fogCouncilGames].some((game) => Object.values(game.bindings).some((binding) => binding.tabId === tabId));
+  return [...state.werewolfGames, ...state.clocktowerGames].some((game) => Object.values(game.bindings).some((binding) => binding.tabId === tabId));
 }
 
 async function managedGroups(): Promise<ManagedGroups> {
@@ -278,7 +322,7 @@ async function addToAiDialogueGroup(tabId: number): Promise<void> {
   const task = aiDialogueGroupTail.then(async () => {
     try {
       if (!(await isManagedTab(tabId))) return;
-      if (await isGameBoundTab(tabId)) return;
+      if (await isGameBoundTab(tabId) || await isQaUngroupedTab(tabId)) return;
       const tab = await chrome.tabs.update(tabId, { autoDiscardable: false });
       if (tab.windowId === undefined) return;
       const groups = await managedGroups();
@@ -313,6 +357,27 @@ async function addToAiDialogueGroup(tabId: number): Promise<void> {
   return task;
 }
 
+async function placeConversationTab(tabId: number, mode: ConversationMode): Promise<void> {
+  await markQaUngroupedTab(tabId, mode === 'qa');
+  if (mode !== 'qa') {
+    await addToAiDialogueGroup(tabId);
+    return;
+  }
+  // Ungroup previously managed AI Chat tabs created by older releases.
+  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+  if (!tab) return;
+  if (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) await chrome.tabs.ungroup(tabId).catch(() => undefined);
+  await chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => undefined);
+}
+
+async function restoreQaTabPlacement(): Promise<void> {
+  const state = await loadState();
+  const ids = new Set(state.conversations.filter((session) => session.mode === 'qa').flatMap((session) => Object.values(session.bindings).map((binding) => binding.tabId)));
+  for (const tabId of ids) {
+    if (await isManagedTab(tabId)) await placeConversationTab(tabId, 'qa');
+  }
+}
+
 async function migrateLegacyGrouping(): Promise<void> {
   const migration = await chrome.storage.local.get(ISOLATION_MIGRATION_KEY);
   if (migration[ISOLATION_MIGRATION_KEY]) return;
@@ -326,7 +391,7 @@ async function migrateLegacyGrouping(): Promise<void> {
   await chrome.storage.local.set({ [ISOLATION_MIGRATION_KEY]: true });
 }
 
-async function createManagedProviderTab(provider: ProviderId, url: string, allowForegroundWake = true): Promise<chrome.tabs.Tab> {
+async function createManagedProviderTab(provider: ProviderId, url: string, allowForegroundWake = true, mode: ConversationMode = 'roundtable'): Promise<chrome.tabs.Tab> {
   if (!allowForegroundWake) {
     const created = await createPrivateGameTab(provider, url);
     if (created.id === undefined) throw new Error('游戏标签页无效');
@@ -338,17 +403,17 @@ async function createManagedProviderTab(provider: ProviderId, url: string, allow
   const created = await chrome.tabs.create({ url: 'about:blank', active: false });
   if (!created.id) throw new Error('Provider 标签页无效');
   await markManagedTab(created.id, provider);
-  await addToAiDialogueGroup(created.id);
+  await placeConversationTab(created.id, mode);
   return chrome.tabs.update(created.id, { url, active: false });
 }
 
-async function ensureProviderTab(provider: ProviderId, allowForegroundWake = true): Promise<chrome.tabs.Tab> {
+async function ensureProviderTab(provider: ProviderId, allowForegroundWake = true, mode: ConversationMode = 'roundtable'): Promise<chrome.tabs.Tab> {
   const homeUrl = providerById[provider].homeUrl;
   if (!homeUrl) throw new Error(`${provider} 尚未接入`);
-  return createManagedProviderTab(provider, homeUrl, allowForegroundWake);
+  return createManagedProviderTab(provider, homeUrl, allowForegroundWake, mode);
 }
 
-async function resolveProviderTab(provider: ProviderId, preferredTabId?: number, preferredUrl?: string, allowForegroundWake = true): Promise<chrome.tabs.Tab> {
+async function resolveProviderTab(provider: ProviderId, preferredTabId?: number, preferredUrl?: string, allowForegroundWake = true, mode: ConversationMode = 'roundtable'): Promise<chrome.tabs.Tab> {
   if (preferredTabId && await isManagedTab(preferredTabId, provider)) {
     let tab: chrome.tabs.Tab | undefined;
     try {
@@ -357,22 +422,22 @@ async function resolveProviderTab(provider: ProviderId, preferredTabId?: number,
       // The bound tab was closed; try reopening the bound conversation URL below.
     }
     if (tab?.id && tab.url && providerById[provider].urlPatterns?.some((pattern) => matchPattern(tab.url!, pattern))) {
-      if (allowForegroundWake) await addToAiDialogueGroup(tab.id);
+      if (allowForegroundWake) await placeConversationTab(tab.id, mode);
       else await preparePrivateGamePage(tab.id, provider);
       return tab;
     }
   }
   if (preferredUrl && providerById[provider].urlPatterns?.some((pattern) => matchPattern(preferredUrl, pattern))) {
-    const reopened = await createManagedProviderTab(provider, preferredUrl, allowForegroundWake);
+    const reopened = await createManagedProviderTab(provider, preferredUrl, allowForegroundWake, mode);
     if (reopened.id) {
       await waitForProviderReady(reopened.id, provider, 30000, true, allowForegroundWake);
     }
     return reopened;
   }
-  return ensureProviderTab(provider, allowForegroundWake);
+  return ensureProviderTab(provider, allowForegroundWake, mode);
 }
 
-async function createFreshConversation(provider: ProviderId, preferredTabId?: number, allowForegroundWake = true) {
+async function createFreshConversation(provider: ProviderId, preferredTabId?: number, allowForegroundWake = true, mode: ConversationMode = 'roundtable') {
   let tab: chrome.tabs.Tab | null = null;
   let alreadyNavigated = false;
   const url = providerById[provider].homeUrl;
@@ -386,7 +451,7 @@ async function createFreshConversation(provider: ProviderId, preferredTabId?: nu
     }
   }
   if (!tab) {
-    tab = await createManagedProviderTab(provider, url, allowForegroundWake);
+    tab = await createManagedProviderTab(provider, url, allowForegroundWake, mode);
     alreadyNavigated = true;
   }
   if (!tab.id) throw new Error('Provider 标签页无效');
@@ -395,7 +460,7 @@ async function createFreshConversation(provider: ProviderId, preferredTabId?: nu
       if (!allowForegroundWake) await preparePrivateGamePage(tab.id, provider);
       await chrome.tabs.update(tab.id, { url, active: false });
     }
-    if (allowForegroundWake) await addToAiDialogueGroup(tab.id);
+    if (allowForegroundWake) await placeConversationTab(tab.id, mode);
     await waitForProviderReady(tab.id, provider, 30000, true, allowForegroundWake);
     const refreshed = await chrome.tabs.get(tab.id);
     return { tabId: tab.id, conversationUrl: refreshed.url };
@@ -482,8 +547,8 @@ async function wakeOperation(operationId: string, requestedTabId?: number, onRea
     const operation = session?.pendingOperations?.[operationId];
     const game = state.werewolfGames.find((item) => Boolean(gamePendingByOperation(item, operationId)));
     const gameOperation = game ? gamePendingByOperation(game, operationId) : undefined;
-    const clockGame = state.fogCouncilGames.find((item) => Boolean(fogCouncilPendingByOperation(item, operationId)));
-    const clockOperation = clockGame ? fogCouncilPendingByOperation(clockGame, operationId) : undefined;
+    const clockGame = state.clocktowerGames.find((item) => Boolean(clocktowerPendingByOperation(item, operationId)));
+    const clockOperation = clockGame ? clocktowerPendingByOperation(clockGame, operationId) : undefined;
     const provider = operation?.provider ?? gameOperation?.provider ?? clockOperation?.provider;
     const tabId = operation
       ? session?.bindings[operation.provider]?.tabId
@@ -497,10 +562,17 @@ async function wakeOperation(operationId: string, requestedTabId?: number, onRea
       onReady?.();
       return;
     }
-    if (replyAccelerationEnabled) {
+    const mode = state.settings.replyAccelerationMode ?? 'background_pump';
+    await startPageFramePump(tabId, provider).catch(() => undefined);
+    if (mode === 'foreground_rotate') {
       await foregroundReplies.sync(state, tabId).catch(() => undefined);
-      await startPageFramePump(tabId, provider).catch(() => undefined);
       onReady?.();
+      return;
+    }
+    const recentActivity = lastProviderActivity.get(operationId) ?? operation?.startedAt ?? Date.now();
+    if (mode !== 'smart_wake' || Date.now() - recentActivity < 12000) {
+      onReady?.();
+      await sendProviderMessage(tabId, provider, { type: 'PROVIDER_CHECK', operationId }).catch(() => undefined);
       return;
     }
     const restore = await temporarilyWakeProviderTab(tabId);
@@ -535,13 +607,15 @@ function syncProviderWatchdog(): Promise<void> {
 
 async function syncProviderWatchdogNow(): Promise<void> {
   const state = await loadState();
-  const accelerationChanged = replyAccelerationEnabled !== (state.settings.replyAcceleration !== false);
-  replyAccelerationEnabled = state.settings.replyAcceleration !== false;
+  const accelerationChanged = lastReplyAccelerationMode !== state.settings.replyAccelerationMode;
+  lastReplyAccelerationMode = state.settings.replyAccelerationMode;
+  // DOM/frame pumping is independent of the foreground selection strategy.
+  replyAccelerationEnabled = true;
   if (accelerationChanged) {
     const boundTabs = new Set([
       ...state.conversations.flatMap((session) => Object.values(session.pendingOperations ?? {}).map((operation) => session.bindings[operation.provider]?.tabId)),
       ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => game.bindings[operation.playerId]?.tabId)),
-      ...state.fogCouncilGames.flatMap((game) => fogCouncilPendingTurns(game).map((operation) => game.bindings[operation.playerId]?.tabId))
+      ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => game.bindings[operation.playerId]?.tabId))
     ]);
     await Promise.allSettled([...boundTabs].filter((id): id is number => typeof id === 'number').map(async (tabId) =>
       chrome.tabs.sendMessage(tabId, { type: 'PROVIDER_CONFIG', replyAcceleration: replyAccelerationEnabled,
@@ -552,27 +626,27 @@ async function syncProviderWatchdogNow(): Promise<void> {
   const activeGameTabs = new Set([
     ...state.werewolfGames.flatMap((game) => gamePendingTurns(game)
       .map((operation) => game.bindings[operation.playerId]?.tabId)),
-    ...state.fogCouncilGames.flatMap((game) => fogCouncilPendingTurns(game)
+    ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game)
       .map((operation) => game.bindings[operation.playerId]?.tabId))
   ].filter((tabId): tabId is number => typeof tabId === 'number'));
   await releaseInactivePrivateGamePages(activeGameTabs);
   for (const [tabId, provider] of framePumpTabs) {
     const conversationNeeded = state.conversations.some((session) => Object.values(session.pendingOperations ?? {}).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || session.bindings[provider]?.tabId === tabId)));
     const gameNeeded = state.werewolfGames.some((game) => gamePendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
-    const fogCouncilNeeded = state.fogCouncilGames.some((game) => fogCouncilPendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
-    const needed = (replyAccelerationEnabled || provider === 'doubao' || provider === 'minimax' || await isGameBoundTab(tabId)) && (conversationNeeded || gameNeeded || fogCouncilNeeded);
+    const clocktowerNeeded = state.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
+    const needed = (replyAccelerationEnabled || provider === 'doubao' || provider === 'minimax' || await isGameBoundTab(tabId)) && (conversationNeeded || gameNeeded || clocktowerNeeded);
     if (!needed) {
       await queuePageFramePump(tabId, 'stop').catch(() => undefined);
     }
   }
   const hasConversationWork = state.conversations.some((session) => Object.keys(session.pendingOperations ?? {}).length || session.execution?.status === 'running');
   const hasGameWork = state.werewolfGames.some((game) => gamePendingTurns(game).length > 0 || game.status === 'running')
-    || state.fogCouncilGames.some((game) => fogCouncilPendingTurns(game).length > 0 || game.status === 'running');
+    || state.clocktowerGames.some((game) => clocktowerPendingTurns(game).length > 0 || game.status === 'running');
   const hasWork = hasConversationWork || hasGameWork;
-  const needsFrameTimer = (hasConversationWork && replyAccelerationEnabled) || hasGameWork;
+  const needsFrameTimer = hasConversationWork || hasGameWork;
   if (needsFrameTimer && replyAccelerationTimer === undefined) {
     retainWorker();
-    replyAccelerationTimer = self.setInterval(() => { void acceleratePendingReplies().catch(console.error); }, 4000) as unknown as number;
+    replyAccelerationTimer = self.setInterval(() => { void acceleratePendingReplies().catch(console.error); }, 2000) as unknown as number;
     void acceleratePendingReplies().catch(console.error);
   } else if (!needsFrameTimer && replyAccelerationTimer !== undefined) {
     self.clearInterval(replyAccelerationTimer);
@@ -597,7 +671,7 @@ async function checkPendingProviders(): Promise<void> {
     // Idle cursors can be resumed after a worker interruption; a live
     // preparing send is never redispatched by a periodic check.
     await werewolfEngine.recover(false);
-    await fogCouncilEngine.recover(false);
+    await clocktowerEngine.recover(false);
     const state = await loadState();
     for (const session of state.conversations) {
       for (const operation of Object.values(session.pendingOperations ?? {})) {
@@ -649,13 +723,13 @@ async function checkPendingProviders(): Promise<void> {
         }
       }
     }
-    for (const game of state.fogCouncilGames) {
-      for (const operation of fogCouncilPendingTurns(game)) {
+    for (const game of state.clocktowerGames) {
+      for (const operation of clocktowerPendingTurns(game)) {
         const tabId = game.bindings[operation.playerId]?.tabId;
         if (!tabId) continue;
         try {
           if (!await isManagedTab(tabId, operation.provider)) {
-            await fogCouncilEngine.handleProviderEvent({ type: 'PROVIDER_ERROR', provider: operation.provider, operationId: operation.operationId, error: '游戏网页绑定失效，已暂停本局，避免操作无关网页或重复发送。' });
+            await clocktowerEngine.handleProviderEvent({ type: 'PROVIDER_ERROR', provider: operation.provider, operationId: operation.operationId, error: '游戏网页绑定失效，已暂停本局，避免操作无关网页或重复发送。' });
             continue;
           }
           await preparePrivateGamePage(tabId, operation.provider);
@@ -667,7 +741,7 @@ async function checkPendingProviders(): Promise<void> {
           if (response.resumed) lastProviderActivity.set(operation.operationId, Date.now());
         } catch {
           if (operation.phase === 'preparing') {
-            await fogCouncilEngine.handleProviderEvent({
+            await clocktowerEngine.handleProviderEvent({
               type: 'PROVIDER_ERROR',
               provider: operation.provider,
               operationId: operation.operationId,
@@ -679,7 +753,7 @@ async function checkPendingProviders(): Promise<void> {
         }
         const lastActivity = lastProviderActivity.get(operation.operationId) ?? operation.startedAt;
         if (Date.now() - lastActivity >= 3 * 60 * 1000) {
-          await fogCouncilEngine.handleProviderEvent({
+          await clocktowerEngine.handleProviderEvent({
             type: 'PROVIDER_ERROR',
             provider: operation.provider,
             operationId: operation.operationId,
@@ -755,11 +829,12 @@ async function sendProviderOperation(
   preferredTabId?: number,
   preferredUrl?: string,
   onBinding?: (tabId: number, conversationUrl?: string) => Promise<void>,
-  allowForegroundWake = true
+  allowForegroundWake = true,
+  mode: ConversationMode = 'roundtable'
 ): Promise<{ tabId: number; conversationUrl?: string }> {
   sendingOperations.add(operationId);
   try {
-    const tab = await resolveProviderTab(provider, preferredTabId, preferredUrl, allowForegroundWake);
+    const tab = await resolveProviderTab(provider, preferredTabId, preferredUrl, allowForegroundWake, mode);
     if (!tab.id) throw new Error('Provider 标签页无效');
     await onBinding?.(tab.id, tab.url);
     await waitForProviderReady(tab.id, provider, 30000, false, allowForegroundWake);
@@ -785,10 +860,10 @@ async function sendProviderOperation(
   } finally { sendingOperations.delete(operationId); }
 }
 
-async function sendToProvider(provider: ProviderId, operationId: string, payload: ComposerPayload, preferredTabId?: number, preferredUrl?: string): Promise<void> {
+async function sendToProvider(provider: ProviderId, operationId: string, payload: ComposerPayload, preferredTabId?: number, preferredUrl?: string, mode: ConversationMode = 'roundtable'): Promise<void> {
   await sendProviderOperation(provider, operationId, payload, preferredTabId, preferredUrl, async (tabId, conversationUrl) => {
     await orchestrator.attachBinding(operationId, provider, tabId, conversationUrl);
-  });
+  }, true, mode);
 }
 
 async function cancelProvider(provider: ProviderId, operationId?: string, preferredTabId?: number): Promise<void> {
@@ -801,7 +876,7 @@ async function cancelProvider(provider: ProviderId, operationId?: string, prefer
 }
 
 const orchestrator = createBackgroundOrchestrator({
-  createFreshConversation,
+  createFreshConversation: (provider, preferredTabId, mode) => createFreshConversation(provider, preferredTabId, true, mode),
   send: sendToProvider,
   cancel: cancelProvider
 });
@@ -817,10 +892,11 @@ const werewolfEngine = createWerewolfEngine({
     async (actualTabId, actualUrl) => { await werewolfEngine.attachBinding(operationId, provider, actualTabId, actualUrl); },
     false
   ),
-  cancel: cancelProvider
+  cancel: cancelProvider,
+  closeTab: async (tabId) => { await chrome.tabs.remove(tabId).catch(() => undefined); }
 });
 
-const fogCouncilEngine = createFogCouncilEngine({
+const clocktowerEngine = createClocktowerEngine({
   createFreshConversation: (provider, preferredTabId) => createFreshConversation(provider, preferredTabId, false),
   send: (provider, operationId, payload, tabId, conversationUrl) => sendProviderOperation(
     provider,
@@ -828,7 +904,7 @@ const fogCouncilEngine = createFogCouncilEngine({
     payload,
     tabId,
     conversationUrl,
-    async (actualTabId, actualUrl) => { await fogCouncilEngine.attachBinding(operationId, provider, actualTabId, actualUrl); },
+    async (actualTabId, actualUrl) => { await clocktowerEngine.attachBinding(operationId, provider, actualTabId, actualUrl); },
     false
   ),
   cancel: cancelProvider,
@@ -836,8 +912,13 @@ const fogCouncilEngine = createFogCouncilEngine({
 });
 
 async function routeProviderEvent(event: ProviderEvent): Promise<void> {
-  const handled = await werewolfEngine.handleProviderEvent(event) || await fogCouncilEngine.handleProviderEvent(event);
-  if (!handled) await orchestrator.handleProviderEvent(event);
+  const handled = await werewolfEngine.handleProviderEvent(event) || await clocktowerEngine.handleProviderEvent(event);
+  if (!handled) {
+    await orchestrator.handleProviderEvent(event);
+    if (event.type === 'PROVIDER_RESPONSE_STARTED' && event.tabId) {
+      await foregroundReplies.sync(await loadState(), event.tabId).catch(() => undefined);
+    }
+  }
 }
 
 // Recover a final reply even if its content script's message channel closed or
@@ -852,7 +933,7 @@ async function replayPendingTerminalEvents(state?: PersistedState): Promise<void
     ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => ({
       operationId: operation.operationId, provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId
     }))),
-    ...state.fogCouncilGames.flatMap((game) => fogCouncilPendingTurns(game).map((operation) => ({
+    ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => ({
       operationId: operation.operationId, provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId
     })))
   ];
@@ -880,14 +961,13 @@ async function acceleratePendingReplies(): Promise<void> {
     // the worker without checking, resuming or submitting an AI operation.
     const privateTargets = [
       ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId }))),
-      ...state.fogCouncilGames.flatMap((game) => fogCouncilPendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId })))
+      ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId })))
     ];
     await Promise.allSettled(privateTargets.map(async ({ tabId, provider }) => {
       if (!tabId || !await isManagedTab(tabId, provider)) return;
       await preparePrivateGamePage(tabId, provider);
       await startPageFramePump(tabId, provider);
     }));
-    if (state.settings.replyAcceleration === false) return;
     const targets = [
       ...state.conversations.flatMap((session) => Object.values(session.pendingOperations ?? {}).map((operation) => ({ operation, tabId: session.bindings[operation.provider]?.tabId })))
     ];
@@ -948,8 +1028,8 @@ async function resumePendingOperationsForTab(tabId: number): Promise<void> {
       }
     }
   }
-  for (const game of state.fogCouncilGames) {
-    for (const operation of fogCouncilPendingTurns(game)) {
+  for (const game of state.clocktowerGames) {
+    for (const operation of clocktowerPendingTurns(game)) {
       if (game.bindings[operation.playerId]?.tabId !== tabId) continue;
       if (sendingOperations.has(operation.operationId)) continue;
       try {
@@ -959,7 +1039,7 @@ async function resumePendingOperationsForTab(tabId: number): Promise<void> {
           operationId: operation.operationId
         }, 15000);
       } catch {
-        // The watchdog will retry without re-submitting a FogCouncil prompt.
+        // The watchdog will retry without re-submitting a Clocktower prompt.
       }
     }
   }
@@ -994,12 +1074,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 void (async () => {
   await migrateLegacyGrouping();
-  replyAccelerationEnabled = (await loadState()).settings.replyAcceleration !== false;
+  await restoreQaTabPlacement();
+  replyAccelerationEnabled = true;
   await replayPendingTerminalEvents();
   await orchestrator.recover();
   await werewolfEngine.recover();
-  await fogCouncilEngine.recover();
+  await clocktowerEngine.recover();
   await recoverQueuedCommands();
+  void cleanupUnusedAttachmentData().catch(console.warn);
   await syncProviderWatchdog();
   await checkPendingProviders();
 })();
@@ -1034,8 +1116,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const state = await loadState();
         const conversationNeeded = state.conversations.some((session) => Object.values(session.pendingOperations ?? {}).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || session.bindings[provider]?.tabId === tabId)));
         const gameNeeded = state.werewolfGames.some((game) => gamePendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
-        const fogCouncilNeeded = state.fogCouncilGames.some((game) => fogCouncilPendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
-        const needed = conversationNeeded || gameNeeded || fogCouncilNeeded;
+        const clocktowerNeeded = state.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((operation) => operation.provider === provider && (operation.phase === 'preparing' || game.bindings[operation.playerId]?.tabId === tabId)));
+        const needed = conversationNeeded || gameNeeded || clocktowerNeeded;
         if (needed || await isPrivateGameTab(tabId, provider)) await startPageFramePump(tabId, provider);
         return { success: true };
       }
@@ -1052,8 +1134,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const game = state.werewolfGames.find((item) => Boolean(gamePendingByOperation(item, operationId)));
         const gameOperation = game ? gamePendingByOperation(game, operationId) : undefined;
         const gameMatches = Boolean(gameOperation && game?.bindings[gameOperation.playerId]?.tabId === sender.tab?.id);
-        const clockGame = state.fogCouncilGames.find((item) => Boolean(fogCouncilPendingByOperation(item, operationId)));
-        const clockOperation = clockGame ? fogCouncilPendingByOperation(clockGame, operationId) : undefined;
+        const clockGame = state.clocktowerGames.find((item) => Boolean(clocktowerPendingByOperation(item, operationId)));
+        const clockOperation = clockGame ? clocktowerPendingByOperation(clockGame, operationId) : undefined;
         const clockMatches = Boolean(clockOperation && clockGame?.bindings[clockOperation.playerId]?.tabId === sender.tab?.id);
         if ((operation && owner?.bindings[operation.provider]?.tabId === sender.tab?.id) || gameMatches || clockMatches) wakeReleases.get(operationId)?.();
         return { success: true };
@@ -1099,7 +1181,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { success: true, tabId: tab.id };
       }
       case 'CREATE_FRESH_CONVERSATION': {
-        const binding = await createFreshConversation(message.provider as ProviderId, message.tabId as number | undefined);
+        const mode: ConversationMode = message.mode === 'qa' ? 'qa' : message.mode === 'expert' ? 'expert' : 'roundtable';
+        const binding = await createFreshConversation(message.provider as ProviderId, message.tabId as number | undefined, true, mode);
         return { success: true, ...binding };
       }
       case 'START_QA_SESSION': {
@@ -1121,15 +1204,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return { success: true, commandId };
       }
+      case 'SUMMARIZE_SESSION': {
+        const commandId = await enqueueCommand({
+          type: 'summary', sessionId: String(message.sessionId), provider: message.provider as ProviderId
+        });
+        return { success: true, commandId };
+      }
+      case 'SKIP_SEQUENTIAL_TURN': {
+        await orchestrator.skipSequentialTurn(String(message.sessionId));
+        return { success: true };
+      }
       case 'RESUME_SEQUENTIAL_SESSION': {
         await orchestrator.resumeSequential(
           String(message.sessionId),
-          message.payload as ComposerPayload | undefined
+          message.payload ? await stashPayloadAttachments(message.payload as ComposerPayload) : undefined
         );
         return { success: true };
       }
       case 'INTERRUPT_SESSION': {
-        await orchestrator.interruptSequential(String(message.sessionId));
+        await orchestrator.interruptSession(String(message.sessionId));
         return { success: true };
       }
       case 'CREATE_WEREWOLF_GAME': {
@@ -1164,36 +1257,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await werewolfEngine.deleteGame(String(message.gameId));
         return { success: true };
       }
-      case 'CREATE_FOG_COUNCIL_GAME': {
-        const game = await fogCouncilEngine.createGame(message.setup);
+      case 'CREATE_CLOCKTOWER_GAME': {
+        const game = await clocktowerEngine.createGame(message.setup);
         return { success: true, gameId: game.id };
       }
-      case 'UPDATE_FOG_COUNCIL_SETUP': {
-        await fogCouncilEngine.updateSetup(message.setup);
+      case 'UPDATE_CLOCKTOWER_SETUP': {
+        await clocktowerEngine.updateSetup(message.setup);
         return { success: true };
       }
-      case 'SET_ACTIVE_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.setActiveGame(message.gameId ? String(message.gameId) : undefined);
+      case 'SET_ACTIVE_CLOCKTOWER_GAME': {
+        await clocktowerEngine.setActiveGame(message.gameId ? String(message.gameId) : undefined);
         return { success: true };
       }
-      case 'START_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.startGame(String(message.gameId));
+      case 'START_CLOCKTOWER_GAME': {
+        await clocktowerEngine.startGame(String(message.gameId));
         return { success: true };
       }
-      case 'INTERRUPT_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.interruptGame(String(message.gameId));
+      case 'INTERRUPT_CLOCKTOWER_GAME': {
+        await clocktowerEngine.interruptGame(String(message.gameId));
         return { success: true };
       }
-      case 'RESUME_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.resumeGame(String(message.gameId));
+      case 'RESUME_CLOCKTOWER_GAME': {
+        await clocktowerEngine.resumeGame(String(message.gameId));
         return { success: true };
       }
-      case 'SUBMIT_FOG_COUNCIL_HUMAN_ACTION': {
-        await fogCouncilEngine.submitHumanAction(String(message.gameId), message.submission ?? {});
+      case 'SUBMIT_CLOCKTOWER_HUMAN_ACTION': {
+        await clocktowerEngine.submitHumanAction(String(message.gameId), message.submission ?? {});
         return { success: true };
       }
-      case 'DELETE_FOG_COUNCIL_GAME': {
-        await fogCouncilEngine.deleteGame(String(message.gameId));
+      case 'DELETE_CLOCKTOWER_GAME': {
+        await clocktowerEngine.deleteGame(String(message.gameId));
         return { success: true };
       }
       case 'SEND_TO_PROVIDER': {

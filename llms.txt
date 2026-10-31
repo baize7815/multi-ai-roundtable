@@ -4,9 +4,9 @@
 > multiple logged-in AI web applications without requiring vendor API keys.
 
 Project owner: https://github.com/baize7815
-Planned repository: https://github.com/baize7815/multi-ai-roundtable
+Repository: https://github.com/baize7815/multi-ai-roundtable
 License: Apache-2.0 for original project code.
-Release version: 0.2.0.
+Current source version: 0.2.4 (main). GitHub Releases may lag behind the source.
 
 ## Architecture
 - src/background/orchestrator.ts: parallel AI chat, sequential roundtable and expert workflows.
@@ -15,8 +15,8 @@ Release version: 0.2.0.
 - src/background/private-game-pages.ts: dedicated game page lifecycle.
 - src/background/werewolf-engine.ts: Werewolf game orchestration.
 - src/game/werewolf/: role, rule, action and context isolation logic.
-- src/background/fog-council-engine.ts and src/game/fog-council/: original
-  hidden-signal council game, human/AI turns, sealed ballots and scoring.
+- src/background/clocktower-engine.ts and src/game/clocktower/: restored
+  classic social-deduction game, human/AI turns and recovery.
 - src/sidepanel/: UI controller, styles and HTML.
 - src/shared/: provider metadata and persistent session types.
 - tests/: deterministic engine and regression tests.
@@ -26,7 +26,8 @@ Release version: 0.2.0.
 - npm ci
 - npm run typecheck
 - npm run test:werewolf
-- npm run test:fog-council
+- node scripts/test-clocktower-core.mjs
+- npm run test:clocktower  # complete simulation may time out
 - npm run build
 
 ## Usage and safety
