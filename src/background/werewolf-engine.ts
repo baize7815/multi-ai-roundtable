@@ -33,6 +33,7 @@ export interface WerewolfProviderBridge {
   createFreshConversation(provider: ProviderId, preferredTabId?: number): Promise<{ tabId: number; conversationUrl?: string }>;
   send(provider: ProviderId, operationId: string, payload: ComposerPayload, tabId?: number, conversationUrl?: string): Promise<{ tabId: number; conversationUrl?: string }>;
   cancel(provider: ProviderId, operationId?: string, tabId?: number): Promise<void>;
+  closeTab(tabId: number): Promise<void>;
 }
 
 interface TurnSpec {
@@ -262,7 +263,12 @@ function prepareTurn(game: WerewolfGameSession, spec: TurnSpec, parallel = false
 
 function nextStep(game: WerewolfGameSession): { dispatch?: WerewolfPendingTurn; dispatchMany?: WerewolfPendingTurn[]; waiting?: boolean; changed?: boolean } {
   if (game.status !== 'running') return { waiting: true };
-  if (game.pendingTurn || game.pendingParallelTurns?.length || game.pendingHumanAction) return { waiting: true };
+  // Human ballots are prepared ahead of AI ballots; one AI provider still
+  // executes at a time. Other phases retain the original blocking semantics.
+  if (game.pendingTurn || game.pendingParallelTurns?.length ||
+    (game.pendingHumanAction && !(game.status === 'running' && game.pendingHumanAction.kind === 'vote'))) {
+    return { waiting: true };
+  }
 
   const prepare = (spec: TurnSpec) => {
     const result = prepareTurn(game, spec);
@@ -337,10 +343,10 @@ function nextStep(game: WerewolfGameSession): { dispatch?: WerewolfPendingTurn; 
       if (game.cursor.index < game.cursor.queue.length) {
         const seat = game.cursor.queue[game.cursor.index];
         const witch = playerBySeat(game, seat)!;
-        const expected: WerewolfActionType[] = ['pass'];
-        if (witch.privateState.witchAntidoteAvailable && game.night.wolfTarget) expected.unshift('save');
-        if (witch.privateState.witchPoisonAvailable) expected.unshift('poison');
         const allowed = alive().filter((target) => target !== seat || (target === game.night.wolfTarget && game.day === 1 && game.rulesetSnapshot.allowWitchSelfSaveFirstNight));
+        const expected: WerewolfActionType[] = ['pass'];
+        if (witch.privateState.witchAntidoteAvailable && game.night.wolfTarget && allowed.includes(game.night.wolfTarget)) expected.unshift('save');
+        if (witch.privateState.witchPoisonAvailable && allowed.some((target) => target !== seat)) expected.unshift('poison');
         return prepare({ seat, kind: 'witch', expectedActions: expected, allowedTargets: allowed });
       }
       enterPhase(game, 'night_resolution');
@@ -408,20 +414,26 @@ function nextStep(game: WerewolfGameSession): { dispatch?: WerewolfPendingTurn; 
       return { changed: true };
     }
     case 'day_vote': {
-      const remaining = game.cursor.queue.filter((seat) => !hasPhaseVoteAction(game, seat));
+      const unvoted = game.cursor.queue.filter((seat) => !hasPhaseVoteAction(game, seat));
+      const humanSeat = unvoted.find((seat) => playerBySeat(game, seat)?.controller === 'human');
+      if (humanSeat && !game.pendingHumanAction) {
+        const allowedTargets = alive().filter((target) => target !== humanSeat);
+        prepareTurn(game, { seat: humanSeat, kind: 'vote',
+          expectedActions: allowedTargets.length ? ['vote'] : ['pass'], allowedTargets }, true);
+        return { changed: true };
+      }
+      const remaining = unvoted.filter((seat) => seat !== game.pendingHumanAction?.seat);
       if (remaining.length) {
         const seat = remaining[0];
         const allowedTargets = alive().filter((target) => target !== seat);
         const result = prepareTurn(game, {
-          seat,
-          kind: 'vote',
+          seat, kind: 'vote',
           expectedActions: allowedTargets.length ? ['vote'] : ['pass'],
           allowedTargets
         });
-        return result.type === 'ai'
-          ? { dispatch: result.pending, changed: true }
-          : { waiting: true, changed: true };
+        return result.type === 'ai' ? { dispatch: result.pending, changed: true } : { waiting: true, changed: true };
       }
+      if (game.pendingHumanAction) return { waiting: true };
       const result = uniqueHighestTarget(game.dayState.votes);
       addGameEvent(game, 'vote_result', `白天投票：${tallyText(game.dayState.votes)}。${result.target ? `${result.target}号最高票。` : result.tied.length ? `平票：${result.tied.join('、')}号。` : '无人形成有效票。'}`, { type: 'public' }, undefined, { day: game.day });
       if (result.target) {
@@ -439,20 +451,26 @@ function nextStep(game: WerewolfGameSession): { dispatch?: WerewolfPendingTurn; 
       return { changed: true };
     }
     case 'day_tiebreak_vote': {
-      const remaining = game.cursor.queue.filter((seat) => !hasPhaseVoteAction(game, seat));
+      const unvoted = game.cursor.queue.filter((seat) => !hasPhaseVoteAction(game, seat));
+      const humanSeat = unvoted.find((seat) => playerBySeat(game, seat)?.controller === 'human');
+      if (humanSeat && !game.pendingHumanAction) {
+        const allowedTargets = (game.cursor.runoffCandidates ?? []).filter((target) => target !== humanSeat);
+        prepareTurn(game, { seat: humanSeat, kind: 'vote',
+          expectedActions: allowedTargets.length ? ['vote'] : ['pass'], allowedTargets }, true);
+        return { changed: true };
+      }
+      const remaining = unvoted.filter((seat) => seat !== game.pendingHumanAction?.seat);
       if (remaining.length) {
         const seat = remaining[0];
         const allowedTargets = (game.cursor.runoffCandidates ?? []).filter((target) => target !== seat);
         const result = prepareTurn(game, {
-          seat,
-          kind: 'vote',
+          seat, kind: 'vote',
           expectedActions: allowedTargets.length ? ['vote'] : ['pass'],
           allowedTargets
         });
-        return result.type === 'ai'
-          ? { dispatch: result.pending, changed: true }
-          : { waiting: true, changed: true };
+        return result.type === 'ai' ? { dispatch: result.pending, changed: true } : { waiting: true, changed: true };
       }
+      if (game.pendingHumanAction) return { waiting: true };
       const result = uniqueHighestTarget(game.dayState.runoffVotes);
       game.dayState.exiledSeat = result.target;
       addGameEvent(game, 'vote_result', `平票重投：${tallyText(game.dayState.runoffVotes)}。${result.target ? `${result.target}号被放逐。` : '仍然平票，本日无人被放逐。'}`, { type: 'public' }, undefined, { day: game.day, runoff: true });
@@ -811,13 +829,16 @@ export function createWerewolfEngine(bridge: WerewolfProviderBridge) {
   }
 
   async function deleteGame(gameId: string): Promise<void> {
-    await mutatePersistedState((state) => {
+    const tabIds = await mutatePersistedState((state) => {
       const game = gameById(state, gameId);
       if (game.status === 'running' || game.status === 'waiting_human' || game.pendingTurn || game.pendingParallelTurns?.length) throw new Error('请先中断正在运行的狼人杀对局');
+      const tabs = [...new Set(Object.values(game.bindings).map((binding) => binding.tabId))];
       state.werewolfGames = state.werewolfGames.filter((item) => item.id !== gameId);
       if (state.activeWerewolfGameId === gameId) state.activeWerewolfGameId = state.werewolfGames.at(-1)?.id;
+      return tabs;
     });
     notifyGameChanged();
+    await Promise.allSettled(tabIds.map((tabId) => bridge.closeTab(tabId)));
   }
 
   async function recover(dispatchPreparing = true): Promise<void> {

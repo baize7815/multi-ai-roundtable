@@ -1195,13 +1195,16 @@ export function createClocktowerEngine(bridge: ClocktowerProviderBridge) {
   }
 
   async function deleteGame(gameId: string): Promise<void> {
-    await mutatePersistedState((state) => {
+    const tabIds = await mutatePersistedState((state) => {
       const game = gameById(state, gameId);
       if (game.status === 'running' || game.status === 'waiting_human' || game.pendingTurn) throw new Error('请先中断正在运行的迷雾议会对局');
+      const tabs = [...new Set(Object.values(game.bindings).map((binding) => binding.tabId))];
       state.clocktowerGames = state.clocktowerGames.filter((item) => item.id !== gameId);
       if (state.activeClocktowerGameId === gameId) state.activeClocktowerGameId = undefined;
+      return tabs;
     });
     notify();
+    await Promise.allSettled(tabIds.map((tabId) => bridge.closeTab(tabId)));
   }
 
   async function attachBinding(operationId: string, provider: ProviderId, tabId: number, conversationUrl?: string): Promise<boolean> {

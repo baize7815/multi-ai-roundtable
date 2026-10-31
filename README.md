@@ -22,7 +22,7 @@
 
 ### 同一个问题，交给不同 AI 回答
 
-你不用在一堆浏览器标签之间来回切换，也不用反复粘贴提示词。侧栏负责把问题送给选定的 AI，并把各自的回答组织在一起。AI 对话网页不自动分组；启用回复加速时优先展示正在生成回复的模型，只选一个模型则停留在它的标签页。手动切换标签可停止本轮自动跟随。
+你不用在一堆浏览器标签之间来回切换，也不用反复粘贴提示词。侧栏负责把问题送给选定的 AI，并把各自的回答组织在一起。AI 对话网页不自动分组。回复调度默认使用后台脉冲，不会自动抢占当前标签；可在设置中选择「智能唤醒」或「前台轮播」。仅开启前台轮播时才自动跟随正在回复的模型，用户手动切换标签后立即停止本轮跟随。
 
 ### AI 圆桌：让模型真的接着彼此的话讨论
 
@@ -87,12 +87,12 @@
 
 ### 安装发行版（推荐）
 
-1. 打开 **[Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest)**，下载 `Multi-AI-Roundtable-v0.2.3.zip`。
+1. 打开 **[Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest)**，下载页面当前提供的发行 ZIP（已发布的安装包版本可能落后于源码）。
 2. 解压 ZIP，打开 Chrome 的 `chrome://extensions/`，开启右上角的 **开发者模式**。
 3. 点击 **加载已解压的扩展程序**，选择解压得到的 **`dist/` 文件夹**。
 4. 登录准备使用的 AI 网站，打开扩展侧栏，选择模型和模式即可。
 
-> **v0.2.3** 继续基于 `local/classic-mode-restoration` 分支发行，修复 AI 对话预设生效时机，优化标签切换并新增七牛云手动预设备份。GitHub `main` 暂不合并，下载以 [Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest) 为准。七牛云真实存储桶读写与经典游戏引擎完整模拟尚未完成验收。
+> **源码 v0.2.4** 已在 `local/classic-mode-restoration` 分支加入回复调度三档策略、会话中断与存储修复、专家模板、一键汇总及宽屏适配。**尚未发布 v0.2.4 Release 安装包**；GitHub `main` 暂不合并。安装包以 [Releases](https://github.com/baize7815/multi-ai-roundtable/releases/latest) 实际展示的版本为准。经典游戏引擎完整自动模拟与真实 Chrome 多窗口交互仍需验收，详见 [v0.2.4 更新说明](docs/RELEASE_NOTES_v0.2.4.md)。
 
 ### 从源码构建（Node.js 22+）
 

@@ -1,7 +1,7 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { PROVIDERS, providerById } from '../shared/providers';
-import { DEFAULT_STATE, STORAGE_KEY, createConversationSession, loadState } from '../shared/storage';
+import { BUILTIN_EXPERT_PRESETS, DEFAULT_STATE, STORAGE_KEY, createConversationSession, loadState } from '../shared/storage';
 import { buildExpertPresetTransferFile, mergeExpertPresets, parseExpertPresetTransferFile, replaceExpertPresets } from './expert-transfer';
 import { CLOUD_CONFIG_STORAGE_KEY, CLOUD_SECRET_SESSION_KEY, uploadExpertPresetsJson, downloadExpertPresetsJson, parseQiniuEndpoint } from './qiniu-presets';
 import type { QiniuCloudConfig } from './qiniu-presets';
@@ -27,7 +27,6 @@ import type {
   ExpertPreset,
   Mode,
   PersistedState,
-  ProviderEvent,
   ProviderId,
   SequentialMode
 } from '../shared/types';
@@ -53,10 +52,7 @@ const ICON_EXPORT = '<svg width="20" height="20" viewBox="0 0 48 48" fill="none"
 let state: PersistedState = structuredClone(DEFAULT_STATE);
 let uiBaseline: PersistedState = structuredClone(DEFAULT_STATE);
 let draftAttachments: AttachmentPayload[] = [];
-let interruptRequested = false;
-let currentOperationId: string | null = null;
-let currentProvider: ProviderId | null = null;
-let currentSequentialSessionId: string | null = null;
+const liveStreamText = new Map<string, string>();
 let editingExpertId: string | null = null;
 let clocktowerSelectedTargets: number[] = [];
 
@@ -68,22 +64,11 @@ interface ProviderAvailability {
 }
 const providerAvailability = new Map<ProviderId, ProviderAvailability>();
 
-interface PendingOperation {
-  messageId: string;
-  sessionId: string;
-  provider: ProviderId;
-  mode: ConversationMode;
-  resolve: (text: string) => void;
-  reject: (error: Error) => void;
-}
-
-const pendingOperations = new Map<string, PendingOperation>();
-
 async function saveState(nextState: PersistedState): Promise<void> {
   const baseline = uiBaseline;
   const changed = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
   const settings: Partial<PersistedState['settings']> = {};
-  for (const key of ['replyAcceleration', 'qaProviders', 'qaPresetByProvider', 'roundtableProviders', 'werewolfProviders', 'clocktowerProviders', 'expertPresetByProvider'] as const) {
+  for (const key of ['replyAccelerationMode', 'qaProviders', 'qaPresetByProvider', 'roundtableProviders', 'werewolfProviders', 'clocktowerProviders', 'expertPresetByProvider'] as const) {
     if (changed(nextState.settings[key], baseline.settings[key])) Object.assign(settings, { [key]: nextState.settings[key] });
   }
   const sessions = nextState.conversations.flatMap<{ id: string; created?: ConversationSession; addedMessages?: ChatMessage[]; rounds?: number; qaPresetAssignments?: ConversationSession['qaPresetAssignments']; expertAssignments?: ConversationSession['expertAssignments']; title?: string }>((session) => {
@@ -868,6 +853,21 @@ function renderClocktower(): void {
   else renderClocktowerGame(game);
 }
 
+function updateStreamingBubbleInPlace(messageId: string, text: string): boolean {
+  const row = [...messagesEl.children].find((item) =>
+    (item as HTMLElement).dataset.messageId === messageId) as HTMLElement | undefined;
+  if (!row || row.dataset.messageStatus !== 'streaming') return false;
+  if (row.dataset.renderedText === text) return true;
+  const bubble = row.querySelector<HTMLElement>('.message-bubble');
+  if (!bubble) return false;
+  const nearBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 90;
+  bubble.innerHTML = renderMarkdown(text || '…');
+  decorateRenderedMarkdown(bubble);
+  row.dataset.renderedText = text;
+  if (nearBottom) requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
+  return true;
+}
+
 function renderMessages(): void {
   if (state.activeMode === 'werewolf') {
     renderWerewolf();
@@ -878,6 +878,19 @@ function renderMessages(): void {
     return;
   }
   const session = activeSession();
+  // Preserve selection and scroll while only streaming text changes.
+  const rows = [...messagesEl.children] as HTMLElement[];
+  if (session.messages.length > 0 && rows.length === session.messages.length &&
+    session.messages.every((message, index) =>
+      rows[index].dataset.messageId === message.id &&
+      rows[index].dataset.messageStatus === (message.status ?? ''))) {
+    for (const message of session.messages) {
+      if (message.role === 'assistant' && message.status === 'streaming') {
+        updateStreamingBubbleInPlace(message.id, liveStreamText.get(message.id) ?? message.text);
+      }
+    }
+    return;
+  }
   messagesEl.replaceChildren();
   if (!session.messages.length) {
     const empty = document.createElement('div');
@@ -888,12 +901,42 @@ function renderMessages(): void {
         ? '输入问题并设置轮数，AI 会按设置顺序依次接力。'
         : '选择专家预设后开始讨论。专家提示词只在各模型首次发言时注入，不写入会话正文。';
     messagesEl.appendChild(empty);
+    if (session.mode === 'expert') {
+      const quick = document.createElement('section');
+      quick.className = 'expert-quick-setup';
+      for (const provider of state.settings.roundtableProviders.filter((id) => providerById[id]?.enabled)) {
+        const label = document.createElement('label');
+        label.textContent = providerLabel(provider);
+        label.append(createPresetSelect(state.settings.expertPresetByProvider[provider], `${providerLabel(provider)} 专家预设`, async (presetId) => {
+          if (presetId) state.settings.expertPresetByProvider[provider] = presetId;
+          else delete state.settings.expertPresetByProvider[provider];
+          syncBlankExpertSessionAssignments();
+          await saveState(state);
+        }));
+        quick.append(label);
+      }
+      const manage = document.createElement('button');
+      manage.textContent = '管理专家预设';
+      manage.className = 'secondary-button';
+      manage.addEventListener('click', () => {
+        renderExpertPresets();
+        openOverlay('expertOverlay');
+      });
+      quick.append(manage);
+      messagesEl.append(quick);
+    }
     return;
   }
 
   for (const message of session.messages) {
     const row = document.createElement('article');
     row.className = `message-row ${message.role}`;
+    row.dataset.messageId = message.id;
+    row.dataset.messageStatus = message.status ?? '';
+    if (message.status !== 'streaming') liveStreamText.delete(message.id);
+    const displayText = message.status === 'streaming'
+      ? liveStreamText.get(message.id) ?? message.text : message.text;
+    row.dataset.renderedText = displayText;
     if (message.provider) row.classList.add(providerById[message.provider].colorClass);
 
     const meta = document.createElement('div');
@@ -908,11 +951,17 @@ function renderMessages(): void {
     const author = document.createElement('span');
     author.textContent = message.role === 'user' ? '你' : providerDisplayLabel(session, message.provider);
     meta.append(author);
+    if (message.kind === 'summary') {
+      const tag = document.createElement('span');
+      tag.className = 'summary-label';
+      tag.textContent = '汇总结论';
+      meta.append(tag);
+    }
 
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
     if (message.role === 'assistant') {
-      bubble.innerHTML = renderMarkdown(message.text || (message.status === 'pending' ? '…' : ''));
+      bubble.innerHTML = renderMarkdown(displayText || (message.status === 'pending' ? '…' : ''));
       decorateRenderedMarkdown(bubble);
     } else {
       const text = document.createElement('div');
@@ -940,6 +989,24 @@ function renderMessages(): void {
             ? '已中断'
             : message.error ?? '发送失败';
       row.append(status);
+      if ((message.status === 'error' || message.status === 'interrupted') &&
+        isSequentialMode(session.mode) && session.execution?.status === 'paused') {
+        const expected = session.execution.providers[session.execution.providerIndex];
+        if (message.provider === expected) {
+          const actions = document.createElement('div');
+          actions.className = 'reply-actions';
+          for (const [label, type] of [['重试此模型', 'RESUME_SEQUENTIAL_SESSION'], ['跳过此模型', 'SKIP_SEQUENTIAL_TURN']]) {
+            const button = document.createElement('button');
+            button.className = 'secondary-button';
+            button.textContent = label;
+            button.addEventListener('click', () => {
+              void runtimeMessage({ type, sessionId: session.id }).catch((error: Error) => showComposerError(error.message));
+            });
+            actions.append(button);
+          }
+          row.append(actions);
+        }
+      }
     }
     messagesEl.append(row);
   }
@@ -1138,6 +1205,7 @@ async function handleClocktowerHumanTextSend(): Promise<void> {
 }
 
 function renderMode(): void {
+  document.body.dataset.mode = state.activeMode;
   document.querySelectorAll<HTMLButtonElement>('.mode-tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.mode === state.activeMode));
   const sequential = isSequentialMode(state.activeMode);
   const werewolf = state.activeMode === 'werewolf';
@@ -1155,9 +1223,41 @@ function renderMode(): void {
   }
   el<HTMLButtonElement>('newConversationButton').title = state.activeMode === 'werewolf' ? '新狼人杀对局' : state.activeMode === 'clocktower' ? '新迷雾议会对局' : `新${modeLabel(state.activeMode)}会话`;
   renderMessages();
+  if (!sequential && !werewolf && !clocktower) {
+    const pending = Object.keys(activeSession().pendingOperations ?? {}).length > 0;
+    qaSendButton.textContent = pending ? '中断' : '发送';
+    qaSendButton.setAttribute('aria-label', pending ? '中断本轮 AI 对话' : '发送');
+    qaSendButton.classList.toggle('danger', pending);
+  }
   if (sequential) renderSequentialControls();
+  renderSummaryControls();
   if (werewolf) renderWerewolfControls();
   if (clocktower) renderClocktowerControls();
+}
+
+function renderSummaryControls(): void {
+  const controls = el<HTMLElement>('summaryControls');
+  if (!isConversationMode(state.activeMode)) {
+    controls.classList.add('hidden');
+    return;
+  }
+  const session = activeSession();
+  const done = session.messages.filter((message) =>
+    message.role === 'assistant' && message.status === 'completed' && message.text.trim() && message.kind !== 'summary');
+  const busy = Object.keys(session.pendingOperations ?? {}).length > 0 || session.execution?.status === 'running';
+  controls.classList.toggle('hidden', done.length < 2 || busy);
+  if (done.length < 2 || busy) return;
+  const select = el<HTMLSelectElement>('summaryProviderSelect');
+  const selected = select.value;
+  const providers = [...new Set(done.map((message) => message.provider).filter((id): id is ProviderId => Boolean(id)))];
+  select.replaceChildren();
+  for (const provider of providers) {
+    const option = document.createElement('option');
+    option.value = provider;
+    option.textContent = providerLabel(provider);
+    select.append(option);
+  }
+  if (providers.includes(selected as ProviderId)) select.value = selected;
 }
 
 function renderAttachmentTray(): void {
@@ -1221,6 +1321,21 @@ function attachmentMetadata(payload: ComposerPayload) {
   return payload.attachments.map(({ id, name, type, size, kind }) => ({ id, name, type, size, kind }));
 }
 
+function compatibleAttachmentProviders(providers: ProviderId[], payload: ComposerPayload): ProviderId[] {
+  if (!payload.attachments.length) return providers;
+  const unsupported = providers.filter((provider) => payload.attachments.some((attachment) => {
+    const cap = providerById[provider].capabilities;
+    return attachment.kind === 'image' ? !cap.images : !cap.attachments;
+  }));
+  if (unsupported.length) {
+    const names = unsupported.map(providerLabel).join('、');
+    showComposerError(payload.text.trim()
+      ? `${names} 不支持上传本次附件，将仅收到文字`
+      : `${names} 不支持上传本次附件，已跳过无文字的发送`);
+  }
+  return payload.text.trim() ? providers : providers.filter((provider) => !unsupported.includes(provider));
+}
+
 async function runtimeMessage<T = any>(message: unknown): Promise<T> {
   const response = await chrome.runtime.sendMessage(message) as T & { success?: boolean; error?: string };
   if (response && response.success === false) throw new Error(response.error || '扩展操作失败');
@@ -1260,105 +1375,19 @@ function rejectKnownBrokenProviders(providers: ProviderId[]): void {
   throw new Error(`以下模型当前不可用：${detail}`);
 }
 
-function updateMessage(sessionId: string, messageId: string, patch: Partial<ChatMessage>): void {
-  const session = sessionById(sessionId);
-  const message = session?.messages.find((item) => item.id === messageId);
-  if (!session || !message) return;
-  Object.assign(message, patch);
-  touchSession(session);
-  if (isActiveConversation(session)) renderMessages();
-  void saveState(state);
-}
-
-function waitForProvider(session: ConversationSession, provider: ProviderId, payload: ComposerPayload, tabId?: number): Promise<string> {
-  const operationId = id('op');
-  const message: ChatMessage = { id: id('msg'), role: 'assistant', provider, text: '', createdAt: Date.now(), status: 'pending' };
-  session.messages.push(message);
-  touchSession(session);
-  if (isActiveConversation(session)) renderMessages();
-
-  return new Promise<string>((resolve, reject) => {
-    pendingOperations.set(operationId, { messageId: message.id, sessionId: session.id, provider, mode: session.mode, resolve, reject });
-    if (isSequentialMode(session.mode)) {
-      currentOperationId = operationId;
-      currentProvider = provider;
-      currentSequentialSessionId = session.id;
-      if (isActiveConversation(session)) renderSequentialControls();
-    }
-    const binding = session.bindings[provider];
-    runtimeMessage({ type: 'SEND_TO_PROVIDER', provider, operationId, payload, tabId, conversationUrl: binding?.conversationUrl })
-      .catch((error: Error) => {
-        pendingOperations.delete(operationId);
-        updateMessage(session.id, message.id, { status: 'error', error: error.message });
-        reject(error);
-      });
-  });
-}
-
-function onProviderEvent(event: ProviderEvent): void {
-  const operationId = event.operationId;
-  if (!operationId) return;
-  const pending = pendingOperations.get(operationId);
-  if (!pending) return;
-  const session = sessionById(pending.sessionId);
-  if (!session) return;
-  if (event.tabId) {
-    const existing = session.bindings[event.provider];
-    session.bindings[event.provider] = {
-      provider: event.provider,
-      tabId: event.tabId,
-      conversationUrl: event.url || existing?.conversationUrl
-    };
-  }
-  if (event.type === 'PROVIDER_RESPONSE_STARTED') updateMessage(session.id, pending.messageId, { status: 'streaming' });
-  if (event.type === 'PROVIDER_RESPONSE_DELTA') updateMessage(session.id, pending.messageId, { text: event.text ?? '', status: 'streaming' });
-  if (event.type === 'PROVIDER_RESPONSE_COMPLETED') {
-    const text = event.text ?? '';
-    updateMessage(session.id, pending.messageId, { text, status: 'completed' });
-    pendingOperations.delete(operationId);
-    pending.resolve(text);
-  }
-  if (event.type === 'PROVIDER_ERROR') {
-    const error = new Error(event.error || `${providerLabel(pending.provider)} 执行失败`);
-    updateMessage(session.id, pending.messageId, { status: 'error', error: error.message });
-    pendingOperations.delete(operationId);
-    pending.reject(error);
-  }
-}
-
-async function ensureSessionBindings(session: ConversationSession, providers: ProviderId[]): Promise<void> {
-  const bindings = { ...session.bindings };
-  if (session.needsFreshConversations) {
-    const created = await Promise.all(providers.map(async (provider) => {
-      const response = await runtimeMessage<{ success: boolean; tabId: number; conversationUrl?: string }>({
-        type: 'CREATE_FRESH_CONVERSATION', provider, mode: session.mode, tabId: bindings[provider]?.tabId
-      });
-      return [provider, { provider, tabId: response.tabId, conversationUrl: response.conversationUrl }] as const;
-    }));
-    for (const [provider, binding] of created) bindings[provider] = binding;
-    session.bindings = bindings;
-    session.needsFreshConversations = false;
-    touchSession(session);
-    await saveState(state);
+async function handleQaSend(): Promise<void> {
+  if (Object.keys(activeSession().pendingOperations ?? {}).length) {
+    try { await runtimeMessage({ type: 'INTERRUPT_SESSION', sessionId: activeSession().id }); }
+    catch (error) { showComposerError(error instanceof Error ? error.message : String(error)); }
     return;
   }
-
-  const missing = providers.filter((provider) => !bindings[provider]);
-  const created = await Promise.all(missing.map(async (provider) => {
-    const response = await runtimeMessage<{ success: boolean; tabId: number; conversationUrl?: string }>({ type: 'CREATE_FRESH_CONVERSATION', provider, mode: session.mode });
-    return [provider, { provider, tabId: response.tabId, conversationUrl: response.conversationUrl }] as const;
-  }));
-  for (const [provider, binding] of created) bindings[provider] = binding;
-  session.bindings = bindings;
-  await saveState(state);
-}
-
-async function handleQaSend(): Promise<void> {
   const payload = takeComposerPayload();
   if (!payload) return;
   const session = activeSession();
-  const providers = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
-  if (!providers.length) return showComposerError('请先在设置里选择至少一个已接入模型');
+  const selectedProviders = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
+  if (!selectedProviders.length) return showComposerError('请先在设置里选择至少一个已接入模型');
+  const providers = compatibleAttachmentProviders(selectedProviders, payload);
+  if (!providers.length) return showComposerError('所选模型无法上传附件，请更换模型或附带文字');
   await refreshProviderAvailability(providers, false);
   session.messages.push({ id: id('msg'), role: 'user', text: payload.text, attachments: attachmentMetadata(payload), createdAt: Date.now(), status: 'completed' });
   if (session.title === '新会话') session.title = deriveTitle(payload);
@@ -1371,28 +1400,6 @@ async function handleQaSend(): Promise<void> {
   } catch (error) {
     showComposerError(error instanceof Error ? error.message : String(error));
   }
-}
-
-function buildSequentialPrompt(session: ConversationSession, provider: ProviderId): string {
-  let lastOwnIndex = -1;
-  session.messages.forEach((message, index) => {
-    if (message.role === 'assistant' && message.provider === provider && message.status === 'completed') lastOwnIndex = index;
-  });
-  const unseen = session.messages
-    .slice(lastOwnIndex + 1)
-    .filter((message) => message.role === 'user' || (message.role === 'assistant' && message.provider !== provider && message.status === 'completed'));
-  const body = unseen.length
-    ? unseen.map((message) => `【${message.role === 'user' ? '用户' : providerDisplayLabel(session, message.provider)}】\n${message.text}`).join('\n\n')
-    : '请继续讨论，补充新的观点。';
-  return `${body}\n\n请基于以上你尚未看到的新增内容继续讨论。避免复述已有内容，直接回应并推进讨论。`;
-}
-
-function withExpertPreset(session: ConversationSession, provider: ProviderId, prompt: string): string {
-  if (session.mode !== 'expert') return prompt;
-  const initialized = session.expertInitializedProviders?.includes(provider) ?? false;
-  const expert = session.expertAssignments?.[provider];
-  if (initialized || !expert?.prompt.trim()) return prompt;
-  return `${expert.prompt.trim()}\n\n${prompt}`;
 }
 
 async function handleSequentialAction(): Promise<void> {
@@ -1422,6 +1429,7 @@ async function handleSequentialAction(): Promise<void> {
   if (!payload) return showComposerError('请输入问题或添加附件');
   const providers = providersForMode(session.mode).filter((provider) => providerById[provider].enabled);
   if (providers.length < 2) return showComposerError(`${modeLabel(session.mode)}至少选择两个已接入模型`);
+  if (!compatibleAttachmentProviders(providers, payload).length) return showComposerError('所选模型无法上传附件，请更换模型或附带文字');
   await refreshProviderAvailability(providers, false);
   if (session.mode === 'expert' && session.messages.length === 0) {
     session.expertAssignments = captureExpertAssignments();
@@ -1446,79 +1454,6 @@ async function handleSequentialAction(): Promise<void> {
   } catch (error) {
     showComposerError(error instanceof Error ? error.message : String(error));
   }
-}
-
-async function runSequential(session: ConversationSession): Promise<void> {
-  const execution = session.execution;
-  if (!execution) return;
-  currentSequentialSessionId = session.id;
-  try {
-    await ensureSessionBindings(session, execution.providers);
-    while (execution.status === 'running' && execution.roundIndex < execution.targetRounds) {
-      const provider = execution.providers[execution.providerIndex];
-      if (!provider || interruptRequested) break;
-      currentProvider = provider;
-      if (isActiveConversation(session)) renderSequentialControls();
-
-      const basePrompt = buildSequentialPrompt(session, provider);
-      const text = withExpertPreset(session, provider, basePrompt);
-      const seen = execution.seenCurrentUserProviders.includes(provider);
-      const turnPayload: ComposerPayload = { text, attachments: seen ? [] : execution.payload.attachments };
-      await waitForProvider(session, provider, turnPayload, session.bindings[provider]?.tabId);
-
-      if (interruptRequested || execution.status !== 'running') break;
-      if (!seen) execution.seenCurrentUserProviders.push(provider);
-      if (session.mode === 'expert' && !(session.expertInitializedProviders?.includes(provider))) {
-        session.expertInitializedProviders = [...(session.expertInitializedProviders ?? []), provider];
-      }
-
-      execution.providerIndex += 1;
-      if (execution.providerIndex >= execution.providers.length) {
-        execution.providerIndex = 0;
-        execution.roundIndex += 1;
-      }
-      touchSession(session);
-      await saveState(state);
-      if (isActiveConversation(session)) renderSequentialControls();
-    }
-
-    if (execution.status === 'running' && execution.roundIndex >= execution.targetRounds) {
-      session.execution = undefined;
-      touchSession(session);
-      await saveState(state);
-    }
-  } catch (error) {
-    if (session.execution) session.execution.status = 'paused';
-    showComposerError(error instanceof Error ? error.message : String(error));
-    await saveState(state);
-  } finally {
-    currentOperationId = null;
-    currentProvider = null;
-    currentSequentialSessionId = null;
-    if (isActiveConversation(session)) renderSequentialControls();
-  }
-}
-
-async function interruptSequential(session: ConversationSession): Promise<void> {
-  interruptRequested = true;
-  if (session.execution) session.execution.status = 'paused';
-  if (currentOperationId) {
-    const pending = pendingOperations.get(currentOperationId);
-    if (pending && pending.sessionId === session.id) {
-      updateMessage(session.id, pending.messageId, { status: 'interrupted' });
-      pendingOperations.delete(currentOperationId);
-      pending.resolve('');
-    }
-  }
-  if (currentProvider) {
-    const binding = session.bindings[currentProvider];
-    await runtimeMessage({ type: 'CANCEL_PROVIDER', provider: currentProvider, operationId: currentOperationId, tabId: binding?.tabId }).catch(() => undefined);
-  }
-  currentOperationId = null;
-  currentProvider = null;
-  touchSession(session);
-  renderSequentialControls();
-  await saveState(state);
 }
 
 function showComposerError(text: string): void {
@@ -1898,10 +1833,10 @@ function renderClocktowerSettings(): void {
 }
 
 function renderSettings(): void {
-  const acceleration = el<HTMLInputElement>('replyAcceleration');
-  acceleration.checked = state.settings.replyAcceleration !== false;
+  const acceleration = el<HTMLSelectElement>('replyAccelerationMode');
+  acceleration.value = state.settings.replyAccelerationMode ?? 'background_pump';
   acceleration.onchange = () => {
-    state.settings.replyAcceleration = acceleration.checked;
+    state.settings.replyAccelerationMode = acceleration.value as NonNullable<PersistedState['settings']['replyAccelerationMode']>;
     void saveState(state).catch((error: unknown) => showComposerError(error instanceof Error ? error.message : String(error)));
   };
   renderQaSettings();
@@ -2476,7 +2411,6 @@ async function newConversation(): Promise<void> {
   const current = activeSession();
   if (current.execution?.status === 'running') return showComposerError('请先中断当前循环再新建会话');
   createSession(mode);
-  interruptRequested = false;
   clearComposer();
   renderMode();
   await saveState(state);
@@ -2537,6 +2471,16 @@ function wireEvents(): void {
   wireOverlay('clocktowerScriptOverlay', 'closeClocktowerScriptButton');
 
   el<HTMLButtonElement>('newExpertButton').addEventListener('click', () => openExpertEditor());
+  el<HTMLButtonElement>('addBuiltinExpertsButton').addEventListener('click', () => {
+    const present = new Set(state.expertPresets.map((preset) => preset.id));
+    const added = BUILTIN_EXPERT_PRESETS.filter((preset) => !present.has(preset.id));
+    state.expertPresets.push(...structuredClone(added));
+    void saveState(state).then(() => {
+      renderExpertPresets();
+      if (state.activeMode === 'expert') renderMessages();
+      showComposerError(added.length ? `已添加 ${added.length} 个专家模板` : '精选模板已全部存在');
+    }).catch((error: Error) => showComposerError(error.message));
+  });
   el<HTMLButtonElement>('saveExpertButton').addEventListener('click', () => void saveExpertPreset());
   el<HTMLButtonElement>('cancelExpertButton').addEventListener('click', closeExpertEditor);
   const expertImportInput = el<HTMLInputElement>('expertImportInput');
@@ -2569,7 +2513,7 @@ function wireEvents(): void {
   messageInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && state.activeMode === 'qa') {
       event.preventDefault();
-      void handleQaSend();
+      if (!Object.keys(activeSession().pendingOperations ?? {}).length) void handleQaSend();
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey && state.activeMode === 'werewolf' && humanTextTurn(activeWerewolfGame()?.pendingHumanAction)) {
@@ -2584,16 +2528,25 @@ function wireEvents(): void {
   });
   qaSendButton.addEventListener('click', () => void handleQaSend());
   roundActionButton.addEventListener('click', () => void handleSequentialAction());
+  el<HTMLButtonElement>('summaryActionButton').addEventListener('click', () => {
+    if (!isConversationMode(state.activeMode)) return;
+    const sessionId = activeSession().id;
+    const provider = el<HTMLSelectElement>('summaryProviderSelect').value as ProviderId;
+    if (!providerById[provider]) return showComposerError('请选择汇总模型');
+    void runtimeMessage({ type: 'SUMMARIZE_SESSION', sessionId, provider })
+      .then(() => showComposerError('已提交汇总请求'))
+      .catch((error: Error) => showComposerError(error.message));
+  });
   el<HTMLButtonElement>('werewolfActionButton').addEventListener('click', () => void handleWerewolfAction());
   el<HTMLButtonElement>('werewolfHumanSendButton').addEventListener('click', () => void handleWerewolfHumanTextSend());
   el<HTMLButtonElement>('clocktowerActionButton').addEventListener('click', () => void handleClocktowerAction());
   el<HTMLButtonElement>('clocktowerHumanSendButton').addEventListener('click', () => void handleClocktowerHumanTextSend());
-  roundRange.addEventListener('input', () => {
+  roundRange.addEventListener('input', () => { roundNumber.value = roundRange.value; });
+  roundRange.addEventListener('change', () => {
     const session = activeSession();
     if (!isSequentialMode(session.mode)) return;
     session.rounds = Number(roundRange.value);
     if (session.execution) session.execution.targetRounds = session.rounds;
-    roundNumber.value = roundRange.value;
     touchSession(session);
     void saveState(state);
   });
@@ -2609,12 +2562,22 @@ function wireEvents(): void {
     void saveState(state);
   });
 
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.source !== 'background' || message.type !== 'STREAM_DELTA') return;
+    const owner = state.conversations.find((session) => session.pendingOperations?.[message.operationId]);
+    const operation = owner?.pendingOperations?.[message.operationId];
+    if (!owner || !operation || operation.provider !== message.provider) return;
+    const text = typeof message.text === 'string' ? message.text : '';
+    liveStreamText.set(operation.messageId, text);
+    if (isActiveConversation(owner)) updateStreamingBubbleInPlace(operation.messageId, text);
+  });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local' && changes[STORAGE_KEY]) void refreshStateFromStorage();
   });
 }
 
 async function init(): Promise<void> {
+  document.body.classList.toggle('standalone', new URLSearchParams(location.search).get('standalone') === '1');
   state = await loadState();
   uiBaseline = structuredClone(state);
   ensureActiveSession('qa');

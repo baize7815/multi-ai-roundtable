@@ -16,6 +16,7 @@ function resetTabs(): void {
 function makeState(mode: ConversationMode, entries: Array<[ProviderId, number, 'pending' | 'streaming']>): PersistedState {
   const state = structuredClone(DEFAULT_STATE);
   state.settings.qaProviders = entries.map(([id]) => id);
+  state.settings.replyAccelerationMode = 'foreground_rotate';
   const session = createConversationSession(mode);
   session.pendingOperations = {};
   for (const [provider, tabId, status] of entries) {
@@ -91,8 +92,13 @@ assert.equal(activeTab, 100, '圆桌回复完成后保留原有恢复逻辑');
 resetTabs();
 scheduler = createReplyForeground(async (id) => tabs.has(id));
 const noAcceleration = makeState('qa', [['deepseek', 101, 'streaming']]);
-noAcceleration.settings.replyAcceleration = false;
+noAcceleration.settings.replyAccelerationMode = 'background_pump';
 await scheduler.sync(noAcceleration);
 assert.equal(activeTab, 100, '关闭回复加速时不能自动切换标签');
+
+const smart = makeState('qa', [['deepseek', 101, 'streaming']]);
+smart.settings.replyAccelerationMode = 'smart_wake';
+await scheduler.sync(smart);
+assert.equal(activeTab, 100, '智能唤醒策略不应主动参与前台轮播');
 
 console.log('reply foreground QA/roundtable tests passed');

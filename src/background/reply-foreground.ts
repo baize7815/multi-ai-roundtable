@@ -60,7 +60,7 @@ export function createReplyForeground(isManaged: (tabId: number) => Promise<bool
       ...state.clocktowerGames.flatMap((game) => Object.values(game.bindings).map((binding) => binding.tabId))
     ]);
     const targets = new Map<number, Target[]>();
-    if (state.settings.replyAcceleration !== false) {
+    if (state.settings.replyAccelerationMode === 'foreground_rotate') {
       const operations = state.conversations.flatMap((session) =>
         Object.values(session.pendingOperations ?? {}).map((operation) => ({ session, operation }))
       );

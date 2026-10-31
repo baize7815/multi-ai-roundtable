@@ -4207,12 +4207,21 @@ var PROVIDERS = [
 var providerById = Object.fromEntries(PROVIDERS.map((provider) => [provider.id, provider]));
 
 // src/shared/storage.ts
+var BUILTIN_EXPERT_PRESETS = [
+  { id: "builtin-expert-1", name: "\u4EA7\u54C1\u603B\u76D1", prompt: "\u4ECE\u7528\u6237\u95EE\u9898\u3001\u4EF7\u503C\u4E3B\u5F20\u3001\u9700\u6C42\u4F18\u5148\u7EA7\u3001\u53EF\u9A8C\u8BC1\u7684 MVP\u3001\u5546\u4E1A\u95ED\u73AF\u548C\u673A\u4F1A\u6210\u672C\u51FA\u53D1\uFF0C\u660E\u786E\u51B3\u7B56\u5EFA\u8BAE\u4E0E\u653E\u5F03\u9879\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-2", name: "\u7CFB\u7EDF\u67B6\u6784\u5E08", prompt: "\u4ECE\u7CFB\u7EDF\u8FB9\u754C\u3001\u6280\u672F\u9009\u578B\u3001\u6570\u636E\u6D41\u3001\u6027\u80FD\u4E0E\u53EF\u9760\u6027\u3001\u6269\u5C55\u6210\u672C\u3001\u6545\u969C\u6062\u590D\u4E0E\u5B89\u5168\u6027\u8BC4\u4F30\u65B9\u6848\uFF0C\u63D0\u51FA\u53EF\u843D\u5730\u7684\u67B6\u6784\u53D6\u820D\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-3", name: "\u9B54\u9B3C\u4EE3\u8A00\u4EBA", prompt: "\u4E3B\u52A8\u5BFB\u627E\u903B\u8F91\u7F3A\u9677\u3001\u9690\u85CF\u524D\u63D0\u3001\u53CD\u4F8B\u3001\u5931\u8D25\u8DEF\u5F84\u53CA\u5408\u89C4\u4E0E\u5B89\u5168\u98CE\u9669\uFF1B\u5148\u9648\u8FF0\u53CD\u65B9\u6700\u5F3A\u8BBA\u8BC1\uFF0C\u518D\u63D0\u51FA\u53EF\u9A8C\u8BC1\u7684\u4FEE\u6B63\u529E\u6CD5\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-4", name: "\u589E\u957F\u8FD0\u8425\u4E13\u5BB6", prompt: "\u5206\u6790\u76EE\u6807\u4EBA\u7FA4\u3001\u51B7\u542F\u52A8\u6E20\u9053\u3001\u8F6C\u5316\u6F0F\u6597\u3001\u7559\u5B58\u673A\u5236\u3001\u589E\u957F\u5B9E\u9A8C\u4E0E\u53EF\u8861\u91CF\u6307\u6807\uFF0C\u6CE8\u610F\u83B7\u5BA2\u6210\u672C\u548C\u589E\u957F\u8D28\u91CF\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-5", name: "\u7528\u6237\u4F53\u9A8C\u8BBE\u8BA1\u5E08", prompt: "\u5173\u6CE8\u7528\u6237\u76EE\u6807\u3001\u4EFB\u52A1\u8DEF\u5F84\u3001\u4EA4\u4E92\u53CD\u9988\u3001\u8BA4\u77E5\u8D1F\u62C5\u3001\u4FE1\u606F\u5C42\u7EA7\u3001\u53EF\u8BBF\u95EE\u6027\u4E0E\u89C6\u89C9\u4E00\u81F4\u6027\uFF0C\u63D0\u51FA\u53EF\u6D4B\u8BD5\u7684\u539F\u578B\u6539\u8FDB\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 },
+  { id: "builtin-expert-6", name: "\u7B2C\u4E00\u6027\u539F\u7406\u601D\u8003\u8005", prompt: "\u660E\u786E\u95EE\u9898\u5B9A\u4E49\uFF0C\u62C6\u9664\u672A\u7ECF\u8BC1\u660E\u7684\u5047\u8BBE\uFF0C\u4ECE\u57FA\u672C\u7EA6\u675F\u4E0E\u53EF\u9A8C\u8BC1\u4E8B\u5B9E\u63A8\u5BFC\u89E3\u6CD5\uFF0C\u5E76\u533A\u5206\u4E8B\u5B9E\u3001\u63A8\u8BBA\u4E0E\u731C\u60F3\u3002", createdAt: 17672256e5, updatedAt: 17672256e5 }
+];
 var STORAGE_KEY = "multiAiRoundtableStateV2";
 var LEGACY_STORAGE_KEY = "multiAiRoundtableStateV1";
 var DEFAULT_STATE = {
   activeMode: "qa",
   settings: {
     replyAcceleration: true,
+    replyAccelerationMode: "background_pump",
     qaProviders: ["doubao", "deepseek"],
     qaPresetByProvider: {},
     roundtableProviders: ["doubao", "deepseek"],
@@ -4220,7 +4229,7 @@ var DEFAULT_STATE = {
     clocktowerProviders: ["doubao", "deepseek", "kimi", "qwen", "zhipu", "gpt", "gemini", "grok"],
     expertPresetByProvider: {}
   },
-  expertPresets: [],
+  expertPresets: structuredClone(BUILTIN_EXPERT_PRESETS),
   conversations: [],
   activeConversationIds: {},
   werewolfGames: [],
@@ -4279,6 +4288,7 @@ function migrateLegacy(legacy) {
     activeMode: legacy.activeMode ?? "qa",
     settings: {
       replyAcceleration: true,
+      replyAccelerationMode: "background_pump",
       qaProviders: legacy.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
       qaPresetByProvider: {},
       roundtableProviders: legacy.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
@@ -4286,7 +4296,7 @@ function migrateLegacy(legacy) {
       clocktowerProviders: DEFAULT_STATE.settings.clocktowerProviders,
       expertPresetByProvider: {}
     },
-    expertPresets: [],
+    expertPresets: structuredClone(BUILTIN_EXPERT_PRESETS),
     conversations: [qa, roundtable, expert],
     activeConversationIds: { qa: qa.id, roundtable: roundtable.id, expert: expert.id },
     werewolfGames: [],
@@ -4310,6 +4320,7 @@ async function loadState() {
     activeMode: stored.activeMode === "fog_council" ? "clocktower" : stored.activeMode ?? "qa",
     settings: {
       replyAcceleration: stored.settings?.replyAcceleration ?? true,
+      replyAccelerationMode: stored.settings?.replyAccelerationMode ?? "background_pump",
       qaProviders: stored.settings?.qaProviders ?? DEFAULT_STATE.settings.qaProviders,
       qaPresetByProvider: stored.settings?.qaPresetByProvider ?? {},
       roundtableProviders: stored.settings?.roundtableProviders ?? DEFAULT_STATE.settings.roundtableProviders,
@@ -4652,7 +4663,7 @@ var ICON_EXPORT = '<svg width="20" height="20" viewBox="0 0 48 48" fill="none" a
 var state = structuredClone(DEFAULT_STATE);
 var uiBaseline = structuredClone(DEFAULT_STATE);
 var draftAttachments = [];
-var interruptRequested = false;
+var liveStreamText = /* @__PURE__ */ new Map();
 var editingExpertId = null;
 var clocktowerSelectedTargets = [];
 var providerAvailability = /* @__PURE__ */ new Map();
@@ -4660,7 +4671,7 @@ async function saveState(nextState) {
   const baseline = uiBaseline;
   const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
   const settings = {};
-  for (const key of ["replyAcceleration", "qaProviders", "qaPresetByProvider", "roundtableProviders", "werewolfProviders", "clocktowerProviders", "expertPresetByProvider"]) {
+  for (const key of ["replyAccelerationMode", "qaProviders", "qaPresetByProvider", "roundtableProviders", "werewolfProviders", "clocktowerProviders", "expertPresetByProvider"]) {
     if (changed(nextState.settings[key], baseline.settings[key])) Object.assign(settings, { [key]: nextState.settings[key] });
   }
   const sessions = nextState.conversations.flatMap((session) => {
@@ -4701,6 +4712,9 @@ function isSequentialMode(mode) {
 }
 function isConversationMode(mode) {
   return mode !== "werewolf" && mode !== "clocktower";
+}
+function isActiveConversation(session) {
+  return isConversationMode(state.activeMode) && state.activeConversationIds[state.activeMode] === session.id;
 }
 function modeLabel(mode) {
   return mode === "qa" ? "AI \u5BF9\u8BDD" : mode === "roundtable" ? "AI \u5706\u684C" : mode === "expert" ? "\u4E13\u5BB6\u56E2" : mode === "werewolf" ? "\u72FC\u4EBA\u6740" : "\u8FF7\u96FE\u8BAE\u4F1A";
@@ -5372,6 +5386,21 @@ function renderClocktower() {
   if (!game) renderClocktowerSetup();
   else renderClocktowerGame(game);
 }
+function updateStreamingBubbleInPlace(messageId, text2) {
+  const row = [...messagesEl.children].find((item) => item.dataset.messageId === messageId);
+  if (!row || row.dataset.messageStatus !== "streaming") return false;
+  if (row.dataset.renderedText === text2) return true;
+  const bubble = row.querySelector(".message-bubble");
+  if (!bubble) return false;
+  const nearBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 90;
+  bubble.innerHTML = renderMarkdown(text2 || "\u2026");
+  decorateRenderedMarkdown(bubble);
+  row.dataset.renderedText = text2;
+  if (nearBottom) requestAnimationFrame(() => {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+  return true;
+}
 function renderMessages() {
   if (state.activeMode === "werewolf") {
     renderWerewolf();
@@ -5382,17 +5411,55 @@ function renderMessages() {
     return;
   }
   const session = activeSession();
+  const rows = [...messagesEl.children];
+  if (session.messages.length > 0 && rows.length === session.messages.length && session.messages.every((message, index) => rows[index].dataset.messageId === message.id && rows[index].dataset.messageStatus === (message.status ?? ""))) {
+    for (const message of session.messages) {
+      if (message.role === "assistant" && message.status === "streaming") {
+        updateStreamingBubbleInPlace(message.id, liveStreamText.get(message.id) ?? message.text);
+      }
+    }
+    return;
+  }
   messagesEl.replaceChildren();
   if (!session.messages.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.textContent = session.mode === "qa" ? "\u540C\u65F6\u5411\u591A\u4E2A AI \u63D0\u95EE\uFF0C\u56DE\u590D\u4F1A\u6309\u6A21\u578B\u5206\u522B\u663E\u793A\u3002" : session.mode === "roundtable" ? "\u8F93\u5165\u95EE\u9898\u5E76\u8BBE\u7F6E\u8F6E\u6570\uFF0CAI \u4F1A\u6309\u8BBE\u7F6E\u987A\u5E8F\u4F9D\u6B21\u63A5\u529B\u3002" : "\u9009\u62E9\u4E13\u5BB6\u9884\u8BBE\u540E\u5F00\u59CB\u8BA8\u8BBA\u3002\u4E13\u5BB6\u63D0\u793A\u8BCD\u53EA\u5728\u5404\u6A21\u578B\u9996\u6B21\u53D1\u8A00\u65F6\u6CE8\u5165\uFF0C\u4E0D\u5199\u5165\u4F1A\u8BDD\u6B63\u6587\u3002";
     messagesEl.appendChild(empty);
+    if (session.mode === "expert") {
+      const quick = document.createElement("section");
+      quick.className = "expert-quick-setup";
+      for (const provider of state.settings.roundtableProviders.filter((id2) => providerById[id2]?.enabled)) {
+        const label = document.createElement("label");
+        label.textContent = providerLabel(provider);
+        label.append(createPresetSelect(state.settings.expertPresetByProvider[provider], `${providerLabel(provider)} \u4E13\u5BB6\u9884\u8BBE`, async (presetId) => {
+          if (presetId) state.settings.expertPresetByProvider[provider] = presetId;
+          else delete state.settings.expertPresetByProvider[provider];
+          syncBlankExpertSessionAssignments();
+          await saveState(state);
+        }));
+        quick.append(label);
+      }
+      const manage = document.createElement("button");
+      manage.textContent = "\u7BA1\u7406\u4E13\u5BB6\u9884\u8BBE";
+      manage.className = "secondary-button";
+      manage.addEventListener("click", () => {
+        renderExpertPresets();
+        openOverlay("expertOverlay");
+      });
+      quick.append(manage);
+      messagesEl.append(quick);
+    }
     return;
   }
   for (const message of session.messages) {
     const row = document.createElement("article");
     row.className = `message-row ${message.role}`;
+    row.dataset.messageId = message.id;
+    row.dataset.messageStatus = message.status ?? "";
+    if (message.status !== "streaming") liveStreamText.delete(message.id);
+    const displayText = message.status === "streaming" ? liveStreamText.get(message.id) ?? message.text : message.text;
+    row.dataset.renderedText = displayText;
     if (message.provider) row.classList.add(providerById[message.provider].colorClass);
     const meta = document.createElement("div");
     meta.className = "message-meta";
@@ -5406,10 +5473,16 @@ function renderMessages() {
     const author = document.createElement("span");
     author.textContent = message.role === "user" ? "\u4F60" : providerDisplayLabel(session, message.provider);
     meta.append(author);
+    if (message.kind === "summary") {
+      const tag2 = document.createElement("span");
+      tag2.className = "summary-label";
+      tag2.textContent = "\u6C47\u603B\u7ED3\u8BBA";
+      meta.append(tag2);
+    }
     const bubble = document.createElement("div");
     bubble.className = "message-bubble";
     if (message.role === "assistant") {
-      bubble.innerHTML = renderMarkdown(message.text || (message.status === "pending" ? "\u2026" : ""));
+      bubble.innerHTML = renderMarkdown(displayText || (message.status === "pending" ? "\u2026" : ""));
       decorateRenderedMarkdown(bubble);
     } else {
       const text2 = document.createElement("div");
@@ -5429,6 +5502,23 @@ function renderMessages() {
       status.className = `message-status ${message.status === "error" ? "error" : ""}`;
       status.textContent = message.status === "pending" ? "\u7B49\u5F85\u56DE\u590D" : message.status === "streaming" ? "\u751F\u6210\u4E2D" : message.status === "interrupted" ? "\u5DF2\u4E2D\u65AD" : message.error ?? "\u53D1\u9001\u5931\u8D25";
       row.append(status);
+      if ((message.status === "error" || message.status === "interrupted") && isSequentialMode(session.mode) && session.execution?.status === "paused") {
+        const expected = session.execution.providers[session.execution.providerIndex];
+        if (message.provider === expected) {
+          const actions = document.createElement("div");
+          actions.className = "reply-actions";
+          for (const [label, type] of [["\u91CD\u8BD5\u6B64\u6A21\u578B", "RESUME_SEQUENTIAL_SESSION"], ["\u8DF3\u8FC7\u6B64\u6A21\u578B", "SKIP_SEQUENTIAL_TURN"]]) {
+            const button = document.createElement("button");
+            button.className = "secondary-button";
+            button.textContent = label;
+            button.addEventListener("click", () => {
+              void runtimeMessage({ type, sessionId: session.id }).catch((error) => showComposerError(error.message));
+            });
+            actions.append(button);
+          }
+          row.append(actions);
+        }
+      }
     }
     messagesEl.append(row);
   }
@@ -5607,6 +5697,7 @@ async function handleClocktowerHumanTextSend() {
   await submitClocktowerHumanAction({ text: text2 });
 }
 function renderMode() {
+  document.body.dataset.mode = state.activeMode;
   document.querySelectorAll(".mode-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.mode === state.activeMode));
   const sequential = isSequentialMode(state.activeMode);
   const werewolf = state.activeMode === "werewolf";
@@ -5624,9 +5715,39 @@ function renderMode() {
   }
   el("newConversationButton").title = state.activeMode === "werewolf" ? "\u65B0\u72FC\u4EBA\u6740\u5BF9\u5C40" : state.activeMode === "clocktower" ? "\u65B0\u8FF7\u96FE\u8BAE\u4F1A\u5BF9\u5C40" : `\u65B0${modeLabel(state.activeMode)}\u4F1A\u8BDD`;
   renderMessages();
+  if (!sequential && !werewolf && !clocktower) {
+    const pending = Object.keys(activeSession().pendingOperations ?? {}).length > 0;
+    qaSendButton.textContent = pending ? "\u4E2D\u65AD" : "\u53D1\u9001";
+    qaSendButton.setAttribute("aria-label", pending ? "\u4E2D\u65AD\u672C\u8F6E AI \u5BF9\u8BDD" : "\u53D1\u9001");
+    qaSendButton.classList.toggle("danger", pending);
+  }
   if (sequential) renderSequentialControls();
+  renderSummaryControls();
   if (werewolf) renderWerewolfControls();
   if (clocktower) renderClocktowerControls();
+}
+function renderSummaryControls() {
+  const controls = el("summaryControls");
+  if (!isConversationMode(state.activeMode)) {
+    controls.classList.add("hidden");
+    return;
+  }
+  const session = activeSession();
+  const done = session.messages.filter((message) => message.role === "assistant" && message.status === "completed" && message.text.trim() && message.kind !== "summary");
+  const busy = Object.keys(session.pendingOperations ?? {}).length > 0 || session.execution?.status === "running";
+  controls.classList.toggle("hidden", done.length < 2 || busy);
+  if (done.length < 2 || busy) return;
+  const select = el("summaryProviderSelect");
+  const selected = select.value;
+  const providers = [...new Set(done.map((message) => message.provider).filter((id2) => Boolean(id2)))];
+  select.replaceChildren();
+  for (const provider of providers) {
+    const option = document.createElement("option");
+    option.value = provider;
+    option.textContent = providerLabel(provider);
+    select.append(option);
+  }
+  if (providers.includes(selected)) select.value = selected;
 }
 function renderAttachmentTray() {
   attachmentTray.replaceChildren();
@@ -5683,6 +5804,18 @@ function clearComposer() {
 function attachmentMetadata(payload) {
   return payload.attachments.map(({ id: id2, name, type, size, kind }) => ({ id: id2, name, type, size, kind }));
 }
+function compatibleAttachmentProviders(providers, payload) {
+  if (!payload.attachments.length) return providers;
+  const unsupported = providers.filter((provider) => payload.attachments.some((attachment) => {
+    const cap = providerById[provider].capabilities;
+    return attachment.kind === "image" ? !cap.images : !cap.attachments;
+  }));
+  if (unsupported.length) {
+    const names = unsupported.map(providerLabel).join("\u3001");
+    showComposerError(payload.text.trim() ? `${names} \u4E0D\u652F\u6301\u4E0A\u4F20\u672C\u6B21\u9644\u4EF6\uFF0C\u5C06\u4EC5\u6536\u5230\u6587\u5B57` : `${names} \u4E0D\u652F\u6301\u4E0A\u4F20\u672C\u6B21\u9644\u4EF6\uFF0C\u5DF2\u8DF3\u8FC7\u65E0\u6587\u5B57\u7684\u53D1\u9001`);
+  }
+  return payload.text.trim() ? providers : providers.filter((provider) => !unsupported.includes(provider));
+}
 async function runtimeMessage(message) {
   const response = await chrome.runtime.sendMessage(message);
   if (response && response.success === false) throw new Error(response.error || "\u6269\u5C55\u64CD\u4F5C\u5931\u8D25");
@@ -5714,11 +5847,21 @@ function rejectKnownBrokenProviders(providers) {
   throw new Error(`\u4EE5\u4E0B\u6A21\u578B\u5F53\u524D\u4E0D\u53EF\u7528\uFF1A${detail}`);
 }
 async function handleQaSend() {
+  if (Object.keys(activeSession().pendingOperations ?? {}).length) {
+    try {
+      await runtimeMessage({ type: "INTERRUPT_SESSION", sessionId: activeSession().id });
+    } catch (error) {
+      showComposerError(error instanceof Error ? error.message : String(error));
+    }
+    return;
+  }
   const payload = takeComposerPayload();
   if (!payload) return;
   const session = activeSession();
-  const providers = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
-  if (!providers.length) return showComposerError("\u8BF7\u5148\u5728\u8BBE\u7F6E\u91CC\u9009\u62E9\u81F3\u5C11\u4E00\u4E2A\u5DF2\u63A5\u5165\u6A21\u578B");
+  const selectedProviders2 = state.settings.qaProviders.filter((provider) => providerById[provider].enabled);
+  if (!selectedProviders2.length) return showComposerError("\u8BF7\u5148\u5728\u8BBE\u7F6E\u91CC\u9009\u62E9\u81F3\u5C11\u4E00\u4E2A\u5DF2\u63A5\u5165\u6A21\u578B");
+  const providers = compatibleAttachmentProviders(selectedProviders2, payload);
+  if (!providers.length) return showComposerError("\u6240\u9009\u6A21\u578B\u65E0\u6CD5\u4E0A\u4F20\u9644\u4EF6\uFF0C\u8BF7\u66F4\u6362\u6A21\u578B\u6216\u9644\u5E26\u6587\u5B57");
   await refreshProviderAvailability(providers, false);
   session.messages.push({ id: id("msg"), role: "user", text: payload.text, attachments: attachmentMetadata(payload), createdAt: Date.now(), status: "completed" });
   if (session.title === "\u65B0\u4F1A\u8BDD") session.title = deriveTitle(payload);
@@ -5758,6 +5901,7 @@ async function handleSequentialAction() {
   if (!payload) return showComposerError("\u8BF7\u8F93\u5165\u95EE\u9898\u6216\u6DFB\u52A0\u9644\u4EF6");
   const providers = providersForMode(session.mode).filter((provider) => providerById[provider].enabled);
   if (providers.length < 2) return showComposerError(`${modeLabel(session.mode)}\u81F3\u5C11\u9009\u62E9\u4E24\u4E2A\u5DF2\u63A5\u5165\u6A21\u578B`);
+  if (!compatibleAttachmentProviders(providers, payload).length) return showComposerError("\u6240\u9009\u6A21\u578B\u65E0\u6CD5\u4E0A\u4F20\u9644\u4EF6\uFF0C\u8BF7\u66F4\u6362\u6A21\u578B\u6216\u9644\u5E26\u6587\u5B57");
   await refreshProviderAvailability(providers, false);
   if (session.mode === "expert" && session.messages.length === 0) {
     session.expertAssignments = captureExpertAssignments();
@@ -6142,10 +6286,10 @@ function renderClocktowerSettings() {
   }
 }
 function renderSettings() {
-  const acceleration = el("replyAcceleration");
-  acceleration.checked = state.settings.replyAcceleration !== false;
+  const acceleration = el("replyAccelerationMode");
+  acceleration.value = state.settings.replyAccelerationMode ?? "background_pump";
   acceleration.onchange = () => {
-    state.settings.replyAcceleration = acceleration.checked;
+    state.settings.replyAccelerationMode = acceleration.value;
     void saveState(state).catch((error) => showComposerError(error instanceof Error ? error.message : String(error)));
   };
   renderQaSettings();
@@ -6689,7 +6833,6 @@ async function newConversation() {
   const current = activeSession();
   if (current.execution?.status === "running") return showComposerError("\u8BF7\u5148\u4E2D\u65AD\u5F53\u524D\u5FAA\u73AF\u518D\u65B0\u5EFA\u4F1A\u8BDD");
   createSession(mode);
-  interruptRequested = false;
   clearComposer();
   renderMode();
   await saveState(state);
@@ -6751,6 +6894,16 @@ function wireEvents() {
   wireOverlay("historyOverlay", "closeHistoryButton");
   wireOverlay("clocktowerScriptOverlay", "closeClocktowerScriptButton");
   el("newExpertButton").addEventListener("click", () => openExpertEditor());
+  el("addBuiltinExpertsButton").addEventListener("click", () => {
+    const present = new Set(state.expertPresets.map((preset) => preset.id));
+    const added = BUILTIN_EXPERT_PRESETS.filter((preset) => !present.has(preset.id));
+    state.expertPresets.push(...structuredClone(added));
+    void saveState(state).then(() => {
+      renderExpertPresets();
+      if (state.activeMode === "expert") renderMessages();
+      showComposerError(added.length ? `\u5DF2\u6DFB\u52A0 ${added.length} \u4E2A\u4E13\u5BB6\u6A21\u677F` : "\u7CBE\u9009\u6A21\u677F\u5DF2\u5168\u90E8\u5B58\u5728");
+    }).catch((error) => showComposerError(error.message));
+  });
   el("saveExpertButton").addEventListener("click", () => void saveExpertPreset());
   el("cancelExpertButton").addEventListener("click", closeExpertEditor);
   const expertImportInput = el("expertImportInput");
@@ -6784,7 +6937,7 @@ function wireEvents() {
   messageInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && state.activeMode === "qa") {
       event.preventDefault();
-      void handleQaSend();
+      if (!Object.keys(activeSession().pendingOperations ?? {}).length) void handleQaSend();
       return;
     }
     if (event.key === "Enter" && !event.shiftKey && state.activeMode === "werewolf" && humanTextTurn(activeWerewolfGame()?.pendingHumanAction)) {
@@ -6799,16 +6952,25 @@ function wireEvents() {
   });
   qaSendButton.addEventListener("click", () => void handleQaSend());
   roundActionButton.addEventListener("click", () => void handleSequentialAction());
+  el("summaryActionButton").addEventListener("click", () => {
+    if (!isConversationMode(state.activeMode)) return;
+    const sessionId = activeSession().id;
+    const provider = el("summaryProviderSelect").value;
+    if (!providerById[provider]) return showComposerError("\u8BF7\u9009\u62E9\u6C47\u603B\u6A21\u578B");
+    void runtimeMessage({ type: "SUMMARIZE_SESSION", sessionId, provider }).then(() => showComposerError("\u5DF2\u63D0\u4EA4\u6C47\u603B\u8BF7\u6C42")).catch((error) => showComposerError(error.message));
+  });
   el("werewolfActionButton").addEventListener("click", () => void handleWerewolfAction());
   el("werewolfHumanSendButton").addEventListener("click", () => void handleWerewolfHumanTextSend());
   el("clocktowerActionButton").addEventListener("click", () => void handleClocktowerAction());
   el("clocktowerHumanSendButton").addEventListener("click", () => void handleClocktowerHumanTextSend());
   roundRange.addEventListener("input", () => {
+    roundNumber.value = roundRange.value;
+  });
+  roundRange.addEventListener("change", () => {
     const session = activeSession();
     if (!isSequentialMode(session.mode)) return;
     session.rounds = Number(roundRange.value);
     if (session.execution) session.execution.targetRounds = session.rounds;
-    roundNumber.value = roundRange.value;
     touchSession(session);
     void saveState(state);
   });
@@ -6823,11 +6985,21 @@ function wireEvents() {
     touchSession(session);
     void saveState(state);
   });
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.source !== "background" || message.type !== "STREAM_DELTA") return;
+    const owner = state.conversations.find((session) => session.pendingOperations?.[message.operationId]);
+    const operation = owner?.pendingOperations?.[message.operationId];
+    if (!owner || !operation || operation.provider !== message.provider) return;
+    const text2 = typeof message.text === "string" ? message.text : "";
+    liveStreamText.set(operation.messageId, text2);
+    if (isActiveConversation(owner)) updateStreamingBubbleInPlace(operation.messageId, text2);
+  });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "local" && changes[STORAGE_KEY]) void refreshStateFromStorage();
   });
 }
 async function init() {
+  document.body.classList.toggle("standalone", new URLSearchParams(location.search).get("standalone") === "1");
   state = await loadState();
   uiBaseline = structuredClone(state);
   ensureActiveSession("qa");

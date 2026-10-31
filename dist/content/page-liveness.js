@@ -60,13 +60,19 @@
     };
     const check = () => {
       if (!active || !hidden()) return;
-      for (const id of [...frames.keys()]) {
-        try {
-          run(id, performance.now());
-        } catch (error) {
-          console.error(error);
+      let burst = 0;
+      const flush = () => {
+        if (!active || !hidden() || Date.now() >= expiresAt) return;
+        for (const id of [...frames.keys()]) {
+          try {
+            run(id, performance.now());
+          } catch (error) {
+            console.error(error);
+          }
         }
-      }
+        if (++burst < 4 && frames.size > 0) window.setTimeout(flush, 40);
+      };
+      flush();
     };
     const renew = () => {
       expiresAt = Date.now() + 45e3;

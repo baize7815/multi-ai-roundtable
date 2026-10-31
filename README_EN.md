@@ -6,7 +6,7 @@ Use your signed-in AI websites for parallel answers, sequential discussions, exp
 
 **Author:** [@baize7815](https://github.com/baize7815) · Chrome MV3 · TypeScript · Free, non-commercial community project · [中文](README.md)
 
-> **Release v0.2.3**: Fixes AI Chat preset injection for existing sessions, keeps AI Chat tabs ungrouped with reply-following navigation, and adds manual Qiniu S3 expert preset backup (cloud integration tested only with simulated requests). The release branch remains separate from `main`.
+> **Source v0.2.4** (`local/classic-mode-restoration`): Improves response monitoring, background scheduling, session cancellation and attachment persistence; adds expert presets, synthesis, recovery controls and wide-screen UI. The v0.2.4 GitHub Release ZIP has **not** been published. Download the available stable ZIP from Releases or build v0.2.4 from source. `main` is unchanged.
 
 ## Highlights
 

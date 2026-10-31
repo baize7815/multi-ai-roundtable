@@ -26,6 +26,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   provider?: ProviderId;
+  kind?: 'summary';
   text: string;
   attachments?: Pick<AttachmentPayload, 'id' | 'name' | 'type' | 'size' | 'kind'>[];
   createdAt: number;
@@ -46,8 +47,11 @@ export interface ProviderCapabilities {
   cancel: boolean;
 }
 
+export type ReplyAccelerationMode = 'background_pump' | 'smart_wake' | 'foreground_rotate';
+
 export interface AppSettings {
-  replyAcceleration?: boolean;
+  replyAcceleration?: boolean; // compatibility with older saved settings
+  replyAccelerationMode?: ReplyAccelerationMode;
   qaProviders: ProviderId[];
   qaPresetByProvider: Partial<Record<ProviderId, string>>;
   roundtableProviders: ProviderId[];

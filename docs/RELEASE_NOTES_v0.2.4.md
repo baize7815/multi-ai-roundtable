@@ -1,0 +1,29 @@
+# Multi AI Roundtable v0.2.4（源码更新）
+
+基于 `local/classic-mode-restoration` 分支 v0.2.3 的增量整改。此记录对应 GitHub **源码与构建产物同步**，不代表已经创建 GitHub Release、签名安装包或合并 `main`。
+
+## 稳定性与性能
+
+- 修复回复完成判定与“回复加速”设置耦合，调整停止生成的静默判断并增加后台有界帧脉冲，降低过早截断风险。
+- 流式回复限频持久化，侧栏增量显示，减少 `chrome.storage.local` 重复写入和列表重绘。
+- 附件 Base64 拆分为独立持久化对象，发送前恢复；加入孤儿附件清理、回归测试及 `unlimitedStorage` 权限。
+- QA 支持中断当前所有并发模型操作，避免长期等待锁住会话。
+- 回复调度提供“后台脉冲（默认）”“智能唤醒”“前台轮播”，默认不自动抢占用户标签页。
+
+## 功能与交互
+
+- 圆桌和专家团增加首轮/轮次/阵容感知、末轮收敛，以及标签重建时预设重新初始化。
+- 狼人杀女巫合法目标、人类投票时机及对局标签页清理；迷雾议会删除对局时同步回收对应标签页。
+- 附件发送进行 Provider 能力预检，不支持的模型在有文字时回退为文字发送。
+- 新增 6 种精选专家预设、专家团快捷选择、一键汇总结论及圆桌失败时重试/跳过入口。
+- 优化五模式顶栏和窄屏布局、全屏 QA 多列比较卡片、系统深色模式；清理旧侧栏调度死代码。
+
+## 验证与限制
+
+- `npm run typecheck`、`npm run test:werewolf`、`node scripts/test-clocktower-core.mjs`、`npm run build`：通过。
+- `npm run test:clocktower`：完整模拟曾在 150 秒后超时，不作为通过记录。
+- 未在真实登录状态下完成所有 AI 网站收发、Windows 窗口遮挡与完整第五模式的端到端验收；七牛云真实网络读写仍需自行验证。
+
+## 安装
+
+这次仅同步 GitHub 分支源码和可加载的 `dist/`，**未创建 v0.2.4 Release ZIP**。若要体验此版本，请检出 `local/classic-mode-restoration` 分支执行 `npm ci && npm run build`，在 `chrome://extensions/` 中选择“加载已解压的扩展程序”，加载 `dist/`。GitHub Releases 的最新安装包仍以页面实际版本为准。

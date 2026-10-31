@@ -2,6 +2,7 @@ import { providerById } from './shared/providers';
 import { loadState, STORAGE_KEY } from './shared/storage';
 import type { ComposerPayload, ConversationMode, PersistedState, ProviderEvent, ProviderId } from './shared/types';
 import { createBackgroundOrchestrator } from './background/orchestrator';
+import { stashPayloadAttachments, cleanupOrphanAttachments } from './background/attachments';
 import { updatePageFramePump } from './background/page-liveness';
 import { createReplyForeground } from './background/reply-foreground';
 import { createPrivateGameTab, forgetPrivateGameTab, isPrivateGameTab, preparePrivateGamePage, releaseInactivePrivateGamePages } from './background/private-game-pages';
@@ -42,6 +43,7 @@ const framePumpTabs = new Map<number, ProviderId>();
 const framePumpQueues = new Map<number, Promise<void>>();
 const foregroundReplies = createReplyForeground(isManagedTab);
 let replyAccelerationEnabled = true;
+let lastReplyAccelerationMode: PersistedState['settings']['replyAccelerationMode'];
 let replyAccelerationTimer: number | undefined;
 let accelerationRunning = false;
 let watchdogSyncRunning = false;
@@ -94,11 +96,13 @@ async function startPageFramePump(tabId: number, provider: ProviderId): Promise<
 
 type BackgroundCommand =
   | { id: string; type: 'qa'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; createdAt: number }
-  | { id: string; type: 'sequential'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; targetRounds: number; createdAt: number };
+  | { id: string; type: 'sequential'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; targetRounds: number; createdAt: number }
+  | { id: string; type: 'summary'; sessionId: string; provider: ProviderId; createdAt: number };
 
 type BackgroundCommandInput =
   | { type: 'qa'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload }
-  | { type: 'sequential'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; targetRounds: number };
+  | { type: 'sequential'; sessionId: string; providers: ProviderId[]; payload: ComposerPayload; targetRounds: number }
+  | { type: 'summary'; sessionId: string; provider: ProviderId };
 
 let commandQueueTail: Promise<unknown> = Promise.resolve();
 let workerKeepAliveCount = 0;
@@ -133,7 +137,8 @@ async function mutateCommandQueue<T>(mutator: (queue: BackgroundCommand[]) => T 
 
 async function enqueueCommand(command: BackgroundCommandInput): Promise<string> {
   const id = `command-${crypto.randomUUID()}`;
-  const record = { ...command, id, createdAt: Date.now() } as BackgroundCommand;
+  const payloadSafe = 'payload' in command ? { ...command, payload: await stashPayloadAttachments(command.payload) } : command;
+  const record = { ...payloadSafe, id, createdAt: Date.now() } as BackgroundCommand;
   await mutateCommandQueue((queue) => { queue.push(record); });
   await chrome.alarms.create(`${COMMAND_ALARM_PREFIX}${id}`, { when: Date.now() + 100 });
   return id;
@@ -152,6 +157,8 @@ async function processQueuedCommand(commandId: string): Promise<void> {
         providers: command.providers,
         payload: command.payload
       });
+    } else if (command.type === 'summary') {
+      await orchestrator.summarizeSession(command.sessionId, command.provider);
     } else {
       await orchestrator.startSequential({
         sessionId: command.sessionId,
@@ -170,6 +177,22 @@ async function processQueuedCommand(commandId: string): Promise<void> {
     releaseWorker();
     commandInFlight.delete(commandId);
   }
+}
+
+async function cleanupUnusedAttachmentData(): Promise<void> {
+  const state = await loadState();
+  const saved = await chrome.storage.local.get(COMMAND_QUEUE_KEY);
+  const queued = (saved[COMMAND_QUEUE_KEY] as BackgroundCommand[] | undefined) ?? [];
+  const active = new Set<string>();
+  const record = (payload?: ComposerPayload) => {
+    for (const attachment of payload?.attachments ?? []) active.add(attachment.id);
+  };
+  for (const session of state.conversations) {
+    record(session.execution?.payload);
+    for (const operation of Object.values(session.pendingOperations ?? {})) record(operation.payload);
+  }
+  for (const command of queued) if ('payload' in command) record(command.payload);
+  await cleanupOrphanAttachments(active);
 }
 
 async function recoverQueuedCommands(): Promise<void> {
@@ -539,10 +562,17 @@ async function wakeOperation(operationId: string, requestedTabId?: number, onRea
       onReady?.();
       return;
     }
-    if (replyAccelerationEnabled) {
+    const mode = state.settings.replyAccelerationMode ?? 'background_pump';
+    await startPageFramePump(tabId, provider).catch(() => undefined);
+    if (mode === 'foreground_rotate') {
       await foregroundReplies.sync(state, tabId).catch(() => undefined);
-      await startPageFramePump(tabId, provider).catch(() => undefined);
       onReady?.();
+      return;
+    }
+    const recentActivity = lastProviderActivity.get(operationId) ?? operation?.startedAt ?? Date.now();
+    if (mode !== 'smart_wake' || Date.now() - recentActivity < 12000) {
+      onReady?.();
+      await sendProviderMessage(tabId, provider, { type: 'PROVIDER_CHECK', operationId }).catch(() => undefined);
       return;
     }
     const restore = await temporarilyWakeProviderTab(tabId);
@@ -577,8 +607,10 @@ function syncProviderWatchdog(): Promise<void> {
 
 async function syncProviderWatchdogNow(): Promise<void> {
   const state = await loadState();
-  const accelerationChanged = replyAccelerationEnabled !== (state.settings.replyAcceleration !== false);
-  replyAccelerationEnabled = state.settings.replyAcceleration !== false;
+  const accelerationChanged = lastReplyAccelerationMode !== state.settings.replyAccelerationMode;
+  lastReplyAccelerationMode = state.settings.replyAccelerationMode;
+  // DOM/frame pumping is independent of the foreground selection strategy.
+  replyAccelerationEnabled = true;
   if (accelerationChanged) {
     const boundTabs = new Set([
       ...state.conversations.flatMap((session) => Object.values(session.pendingOperations ?? {}).map((operation) => session.bindings[operation.provider]?.tabId)),
@@ -611,10 +643,10 @@ async function syncProviderWatchdogNow(): Promise<void> {
   const hasGameWork = state.werewolfGames.some((game) => gamePendingTurns(game).length > 0 || game.status === 'running')
     || state.clocktowerGames.some((game) => clocktowerPendingTurns(game).length > 0 || game.status === 'running');
   const hasWork = hasConversationWork || hasGameWork;
-  const needsFrameTimer = (hasConversationWork && replyAccelerationEnabled) || hasGameWork;
+  const needsFrameTimer = hasConversationWork || hasGameWork;
   if (needsFrameTimer && replyAccelerationTimer === undefined) {
     retainWorker();
-    replyAccelerationTimer = self.setInterval(() => { void acceleratePendingReplies().catch(console.error); }, 4000) as unknown as number;
+    replyAccelerationTimer = self.setInterval(() => { void acceleratePendingReplies().catch(console.error); }, 2000) as unknown as number;
     void acceleratePendingReplies().catch(console.error);
   } else if (!needsFrameTimer && replyAccelerationTimer !== undefined) {
     self.clearInterval(replyAccelerationTimer);
@@ -860,7 +892,8 @@ const werewolfEngine = createWerewolfEngine({
     async (actualTabId, actualUrl) => { await werewolfEngine.attachBinding(operationId, provider, actualTabId, actualUrl); },
     false
   ),
-  cancel: cancelProvider
+  cancel: cancelProvider,
+  closeTab: async (tabId) => { await chrome.tabs.remove(tabId).catch(() => undefined); }
 });
 
 const clocktowerEngine = createClocktowerEngine({
@@ -935,7 +968,6 @@ async function acceleratePendingReplies(): Promise<void> {
       await preparePrivateGamePage(tabId, provider);
       await startPageFramePump(tabId, provider);
     }));
-    if (state.settings.replyAcceleration === false) return;
     const targets = [
       ...state.conversations.flatMap((session) => Object.values(session.pendingOperations ?? {}).map((operation) => ({ operation, tabId: session.bindings[operation.provider]?.tabId })))
     ];
@@ -1043,12 +1075,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 void (async () => {
   await migrateLegacyGrouping();
   await restoreQaTabPlacement();
-  replyAccelerationEnabled = (await loadState()).settings.replyAcceleration !== false;
+  replyAccelerationEnabled = true;
   await replayPendingTerminalEvents();
   await orchestrator.recover();
   await werewolfEngine.recover();
   await clocktowerEngine.recover();
   await recoverQueuedCommands();
+  void cleanupUnusedAttachmentData().catch(console.warn);
   await syncProviderWatchdog();
   await checkPendingProviders();
 })();
@@ -1171,15 +1204,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return { success: true, commandId };
       }
+      case 'SUMMARIZE_SESSION': {
+        const commandId = await enqueueCommand({
+          type: 'summary', sessionId: String(message.sessionId), provider: message.provider as ProviderId
+        });
+        return { success: true, commandId };
+      }
+      case 'SKIP_SEQUENTIAL_TURN': {
+        await orchestrator.skipSequentialTurn(String(message.sessionId));
+        return { success: true };
+      }
       case 'RESUME_SEQUENTIAL_SESSION': {
         await orchestrator.resumeSequential(
           String(message.sessionId),
-          message.payload as ComposerPayload | undefined
+          message.payload ? await stashPayloadAttachments(message.payload as ComposerPayload) : undefined
         );
         return { success: true };
       }
       case 'INTERRUPT_SESSION': {
-        await orchestrator.interruptSequential(String(message.sessionId));
+        await orchestrator.interruptSession(String(message.sessionId));
         return { success: true };
       }
       case 'CREATE_WEREWOLF_GAME': {
