@@ -4638,6 +4638,26 @@ var ROLE_IDS_BY_TYPE = {
   demon: TROUBLE_BREWING_ROLES.filter((item) => item.type === "demon").map((item) => item.id)
 };
 
+// src/game/clocktower/phase-guide.ts
+function clocktowerPhaseGuide(phase, pending) {
+  if (phase === "day_whispers") {
+    if (pending?.kind === "whisper" && pending.metadata?.mode === "reply")
+      return "\u8FD9\u662F\u5BF9\u65B9\u53D1\u7ED9\u4F60\u7684\u79C1\u4EBA\u6D88\u606F\u3002\u8BF7\u5728\u4E0B\u65B9\u56DE\u590D\uFF1B\u5185\u5BB9\u53EA\u6709\u4F60\u548C\u5BF9\u65B9\u53EF\u89C1\u3002\u79C1\u804A\u7ED3\u675F\u540E\u624D\u8FDB\u5165\u5168\u4F53\u516C\u5F00\u8BA8\u8BBA\u3002";
+    return "\u5F53\u524D\u662F\u767D\u5929\u7684\u53EF\u9009\u79C1\u804A\uFF0C\u4E0D\u662F\u591C\u95F4\u89D2\u8272\u6280\u80FD\u3002\u53EF\u4EE5\u8F93\u5165\u79C1\u804A\u5185\u5BB9\u5E76\u9009\u62E9\u4E00\u540D\u73A9\u5BB6\uFF0C\u4E5F\u53EF\u4EE5\u8DF3\u8FC7\u3002\u6240\u6709\u73A9\u5BB6\u5B8C\u6210\u540E\u8FDB\u5165\u5168\u4F53\u516C\u5F00\u8BA8\u8BBA\uFF0C\u4F60\u8FD8\u4F1A\u6709\u516C\u5F00\u53D1\u8A00\u56DE\u5408\u3002";
+  }
+  if (phase === "day_discussion")
+    return "\u5F53\u524D\u662F\u5168\u4F53\u516C\u5F00\u8BA8\u8BBA\u3002\u4E0B\u65B9\u8F93\u5165\u7684\u5185\u5BB9\u4F1A\u5BF9\u6240\u6709\u73A9\u5BB6\u53EF\u89C1\uFF1B\u8FD9\u4E0D\u662F\u79C1\u804A\u3002";
+  if (phase === "first_night" || phase === "other_night")
+    return "\u5F53\u524D\u662F\u591C\u95F4\u89D2\u8272\u884C\u52A8\uFF0C\u76F8\u5173\u64CD\u4F5C\u548C\u7ED3\u679C\u4EC5\u5BF9\u6709\u6743\u9650\u7684\u73A9\u5BB6\u53EF\u89C1\u3002";
+  if (phase === "nomination")
+    return "\u5F53\u524D\u662F\u516C\u5F00\u63D0\u540D\u9636\u6BB5\u3002\u6BCF\u540D\u5B58\u6D3B\u73A9\u5BB6\u53EF\u6309\u89C4\u5219\u63D0\u540D\u4E00\u6B21\uFF0C\u6216\u9009\u62E9\u8DF3\u8FC7\u3002";
+  if (phase === "accusation" || phase === "defense")
+    return "\u5F53\u524D\u662F\u516C\u5F00\u6307\u63A7\u6216\u8FA9\u62A4\u9636\u6BB5\u3002\u4E0B\u65B9\u53D1\u8A00\u4F1A\u5BF9\u5168\u4F53\u73A9\u5BB6\u53EF\u89C1\u3002";
+  if (phase === "vote")
+    return "\u5F53\u524D\u662F\u516C\u5F00\u6295\u7968\u9636\u6BB5\u3002\u8BF7\u9009\u62E9\u662F\u5426\u6295\u7968\uFF0C\u7CFB\u7EDF\u4F1A\u7EDF\u4E00\u8BA1\u7968\u3002";
+  return "";
+}
+
 // src/game/clocktower/core.ts
 function publiclyAlive(game, player) {
   if (game.status === "ended") return player.alive;
@@ -5069,8 +5089,18 @@ function renderWerewolfGame(game) {
   if (game.pendingTurn || game.pendingParallelTurns?.length) {
     const thinking = document.createElement("div");
     thinking.className = "werewolf-thinking";
-    thinking.textContent = game.phase === "day_vote" || game.phase === "day_tiebreak_vote" ? `\u6295\u7968\u5904\u7406\u4E2D\u2026${game.pendingParallelTurns?.length ? ` \u5269\u4F59 ${game.pendingParallelTurns.length + (game.pendingHumanAction ? 1 : 0)} \u7968` : ""}` : canRevealPendingWerewolfActor(game) ? `${game.pendingTurn.seat}\u53F7 \xB7 ${providerLabel(game.pendingTurn.provider)} \u6B63\u5728\u601D\u8003\u2026` : game.phase.startsWith("wolf_") || game.phase === "seer_action" || game.phase === "witch_action" || game.phase === "night_start" || game.phase === "night_resolution" ? werewolfProgressLabel(game) : "\u6E38\u620F\u5904\u7406\u4E2D\u2026";
+    const current = game.pendingTurn ?? game.pendingParallelTurns?.[0];
+    const progress = current?.phase === "preparing" ? "\u6B63\u5728\u53D1\u9001\u6307\u4EE4" : current?.responseStartedAt ? "\u5DF2\u6536\u5230\u56DE\u590D\uFF0C\u7B49\u5F85\u751F\u6210\u5B8C\u6210" : current?.submissionUnconfirmedAt ? "\u53D1\u9001\u672A\u83B7\u786E\u8BA4\uFF0C\u6301\u7EED\u76D1\u542C\u7F51\u9875\u56DE\u590D" : "\u5DF2\u53D1\u9001\uFF0C\u7B49\u5F85\u7F51\u9875\u56DE\u590D";
+    thinking.textContent = (game.phase === "day_vote" || game.phase === "day_tiebreak_vote" ? `\u6295\u7968\u5904\u7406\u4E2D\u2026${game.pendingParallelTurns?.length ? ` \u5269\u4F59 ${game.pendingParallelTurns.length + (game.pendingHumanAction ? 1 : 0)} \u7968` : ""}` : canRevealPendingWerewolfActor(game) ? `${game.pendingTurn.seat}\u53F7 \xB7 ${providerLabel(game.pendingTurn.provider)} \u6B63\u5728\u601D\u8003\u2026` : game.phase.startsWith("wolf_") || game.phase === "seer_action" || game.phase === "witch_action" || game.phase === "night_start" || game.phase === "night_resolution" ? werewolfProgressLabel(game) : "\u6E38\u620F\u5904\u7406\u4E2D\u2026") + ` \xB7 ${progress}`;
     dashboard.append(thinking);
+  }
+  if ((game.status === "paused" || game.status === "error") && game.lastError) {
+    const failure = document.createElement("div");
+    failure.className = "werewolf-thinking";
+    failure.style.color = "var(--danger)";
+    const privatePhase = game.phase.startsWith("wolf_") || game.phase.startsWith("night_") || game.phase === "seer_action" || game.phase === "witch_action";
+    failure.textContent = privatePhase ? privateGameErrorSummary(game.lastError) : game.lastError;
+    dashboard.append(failure);
   }
   if (game.pendingHumanAction) renderHumanActionPanel(game, game.pendingHumanAction, dashboard);
   messagesEl.append(dashboard);
@@ -5092,7 +5122,7 @@ function clocktowerPhaseLabel(game) {
     first_night: "\u7B2C\u4E00\u591C",
     other_night: `\u7B2C ${game.day} \u591C`,
     dawn: `\u7B2C ${game.day} \u5929\u5929\u4EAE`,
-    day_whispers: "\u79C1\u804A\u9636\u6BB5",
+    day_whispers: "\u767D\u5929\xB7\u53EF\u9009\u79C1\u804A\uFF08\u516C\u5F00\u53D1\u8A00\u524D\uFF09",
     day_discussion: "\u516C\u5F00\u8BA8\u8BBA",
     nomination: "\u63D0\u540D\u9636\u6BB5",
     accusation: "\u6307\u63A7",
@@ -5195,6 +5225,16 @@ function renderClocktowerHumanActionPanel(game, pending, dashboard) {
   intro.style.color = "var(--muted)";
   intro.textContent = pending.prompt.includes("[CURRENT TURN]") ? `\u8F6E\u5230\u4F60\u884C\u52A8 \xB7 ${clocktowerPhaseLabel(game)}` : pending.prompt;
   panel.append(intro);
+  const guide = clocktowerPhaseGuide(game.phase, pending);
+  if (guide) {
+    const explanation = document.createElement("p");
+    explanation.className = "clocktower-phase-guide";
+    explanation.style.fontSize = "11px";
+    explanation.style.color = "var(--muted)";
+    explanation.style.width = "100%";
+    explanation.textContent = guide;
+    panel.append(explanation);
+  }
   const submitDirect = (actionType, targetSeats) => void submitClocktowerHumanAction({ actionType, targetSeats });
   if (pending.expectedActions.includes("vote_yes")) {
     const yes = document.createElement("button");
@@ -5246,7 +5286,7 @@ function renderClocktowerHumanActionPanel(game, pending, dashboard) {
     const pass = document.createElement("button");
     pass.type = "button";
     pass.className = "clocktower-target-button";
-    pass.textContent = "\u8DF3\u8FC7";
+    pass.textContent = pending.kind === "whisper" ? "\u8DF3\u8FC7\u79C1\u804A\uFF08\u7EE7\u7EED\u767D\u5929\uFF09" : "\u8DF3\u8FC7";
     pass.addEventListener("click", () => submitDirect("pass"));
     panel.append(pass);
   }
@@ -5255,7 +5295,7 @@ function renderClocktowerHumanActionPanel(game, pending, dashboard) {
     hint.style.width = "100%";
     hint.style.fontSize = "10px";
     hint.style.color = "var(--muted)";
-    hint.textContent = "\u5148\u5728\u4E0B\u65B9\u8F93\u5165\u79C1\u804A\u5185\u5BB9\uFF0C\u518D\u9009\u62E9\u76EE\u6807\u5EA7\u4F4D\u3002";
+    hint.textContent = "\u53EF\u9009\uFF1A\u5148\u8F93\u5165\u4EC5\u5BF9\u53CC\u65B9\u53EF\u89C1\u7684\u5185\u5BB9\uFF0C\u518D\u9009\u4E00\u540D\u79C1\u804A\u5BF9\u8C61\u5E76\u70B9\u51FB\u63D0\u4EA4\uFF1B\u8DF3\u8FC7\u5219\u8FDB\u5165\u540E\u7EED\u6D41\u7A0B\u3002";
     panel.append(hint);
     for (const target of pending.allowedTargets) {
       const button = document.createElement("button");
@@ -5372,8 +5412,16 @@ function renderClocktowerGame(game) {
     const thinking = document.createElement("div");
     thinking.className = "werewolf-thinking";
     const hidden = game.phase === "first_night" || game.phase === "other_night";
-    thinking.textContent = hidden ? "\u591C\u95F4\u884C\u52A8\u5904\u7406\u4E2D\u2026" : `${game.pendingTurn.seat}\u53F7\u6B63\u5728\u884C\u52A8\u2026`;
+    const progress = game.pendingTurn.phase === "preparing" ? "\u6B63\u5728\u53D1\u9001\u6307\u4EE4" : game.pendingTurn.responseStartedAt ? "\u5DF2\u6536\u5230\u56DE\u590D\uFF0C\u7B49\u5F85\u751F\u6210\u5B8C\u6210" : game.pendingTurn.submissionUnconfirmedAt ? "\u53D1\u9001\u672A\u83B7\u786E\u8BA4\uFF0C\u6301\u7EED\u76D1\u542C\u7F51\u9875\u56DE\u590D" : "\u5DF2\u53D1\u9001\uFF0C\u7B49\u5F85\u7F51\u9875\u56DE\u590D";
+    thinking.textContent = (hidden ? "\u591C\u95F4\u884C\u52A8\u5904\u7406\u4E2D\u2026" : `${game.pendingTurn.seat}\u53F7\u6B63\u5728\u884C\u52A8\u2026`) + ` \xB7 ${progress}`;
     dashboard.append(thinking);
+  }
+  if ((game.status === "paused" || game.status === "error") && game.lastError) {
+    const failure = document.createElement("div");
+    failure.className = "werewolf-thinking";
+    failure.style.color = "var(--danger)";
+    failure.textContent = game.phase === "first_night" || game.phase === "other_night" ? privateGameErrorSummary(game.lastError) : game.lastError;
+    dashboard.append(failure);
   }
   if (game.pendingHumanAction) renderClocktowerHumanActionPanel(game, game.pendingHumanAction, dashboard);
   messagesEl.append(dashboard);
@@ -5545,6 +5593,28 @@ function renderSequentialControls() {
     roundtableStatus.textContent = "\u5F85\u5F00\u59CB";
   }
 }
+var pendingGameLaunch;
+function gameLaunchButton(mode, button, status) {
+  if (pendingGameLaunch?.mode !== mode) {
+    button.disabled = false;
+    return false;
+  }
+  button.textContent = pendingGameLaunch.cancelRequested ? "\u6B63\u5728\u4E2D\u65AD\u2026" : "\u4E2D\u65AD";
+  button.classList.add("danger");
+  button.disabled = pendingGameLaunch.cancelRequested;
+  status.textContent = pendingGameLaunch.cancelRequested ? "\u6B63\u5728\u5B89\u5168\u505C\u6B62\u5F00\u5C40\u2026" : "\u6B63\u5728\u521D\u59CB\u5316 AI \u7F51\u9875\u2026";
+  return true;
+}
+function privateGameErrorSummary(error) {
+  if (error?.includes("\u7F51\u9875\u53D1\u9001\u672A\u786E\u8BA4")) return "\u7F51\u9875\u672A\u786E\u8BA4\u53D1\u9001\uFF0C\u7B49\u5F85 180 \u79D2\u4ECD\u65E0\u56DE\u590D\u3002\u5DF2\u5B89\u5168\u6682\u505C\uFF0C\u6CA1\u6709\u91CD\u590D\u53D1\u9001\u6D88\u606F\u3002";
+  if (error && /动作|格式|协议|无法结算/.test(error)) {
+    return "AI \u5DF2\u8FD4\u56DE\u6587\u5B57\uFF0C\u4F46\u884C\u52A8\u683C\u5F0F\u65E0\u6CD5\u6309\u6E38\u620F\u89C4\u5219\u7ED3\u7B97\uFF1B\u5DF2\u6682\u505C\uFF0C\u8BF7\u68C0\u67E5\u6A21\u578B\u8F93\u51FA\u540E\u7EE7\u7EED\u3002";
+  }
+  if (error && /未确认|超时|无响应|等待|发送阶段/.test(error)) {
+    return "AI \u7F51\u9875\u56DE\u590D\u672A\u80FD\u5B8C\u6210\u540E\u53F0\u786E\u8BA4\uFF1B\u5DF2\u6682\u505C\u3002\u7F51\u9875\u51FA\u73B0\u6587\u5B57\u4E0D\u4EE3\u8868\u6269\u5C55\u5DF2\u6536\u5230\u6700\u7EC8\u7ED3\u679C\u3002";
+  }
+  return "\u540E\u53F0 AI \u64CD\u4F5C\u5F02\u5E38\uFF0C\u5DF2\u6682\u505C\u672C\u5C40\uFF1B\u8BF7\u68C0\u67E5\u6A21\u578B\u7F51\u9875\u8FDE\u63A5\u72B6\u6001\u540E\u7EE7\u7EED\u3002";
+}
 function renderWerewolfControls() {
   const game = activeWerewolfGame();
   const actionButton = el("werewolfActionButton");
@@ -5561,6 +5631,7 @@ function renderWerewolfControls() {
   attachmentTray.classList.add("hidden");
   messageInput.placeholder = textTurn ? game?.pendingHumanAction?.kind === "last_word" ? "\u8F93\u5165\u4F60\u7684\u9057\u8A00\u2026" : game?.pendingHumanAction?.kind === "wolf_discussion" ? "\u8F93\u5165\u72FC\u4EBA\u79C1\u5BC6\u8BA8\u8BBA\u5185\u5BB9\u2026" : "\u8F93\u5165\u4F60\u7684\u516C\u5F00\u53D1\u8A00\u2026" : "\u8F93\u5165\u6D88\u606F\u2026";
   messageInput.rows = 2;
+  if (gameLaunchButton("werewolf", actionButton, status)) return;
   if (!game) {
     actionButton.textContent = "\u5F00\u59CB";
     actionButton.classList.remove("danger");
@@ -5572,14 +5643,25 @@ function renderWerewolfControls() {
   status.textContent = game.status === "running" ? werewolfPhaseLabelForHuman(game) : werewolfStatusLabel(game);
 }
 async function handleWerewolfAction() {
+  if (pendingGameLaunch?.mode === "werewolf") {
+    pendingGameLaunch.cancelRequested = true;
+    renderWerewolfControls();
+    return;
+  }
+  if (pendingGameLaunch) return;
   const game = activeWerewolfGame();
+  let launch;
   try {
     if (!game) {
       const setup = state.werewolfSetup;
       const needed = setup.playerCount - (setup.includeHuman ? 1 : 0);
       const providers = state.settings.werewolfProviders.filter((provider) => providerById[provider]?.enabled);
       if (providers.length < needed) return showComposerError(`\u5F53\u524D ${setup.playerCount} \u4EBA\u914D\u7F6E\u81F3\u5C11\u9700\u8981 ${needed} \u4E2A\u5DF2\u63A5\u5165 AI \u6A21\u578B`);
+      launch = { mode: "werewolf", cancelRequested: false };
+      pendingGameLaunch = launch;
+      renderWerewolfControls();
       await refreshProviderAvailability(providers.slice(0, needed), false);
+      if (launch.cancelRequested) return;
       const normalized = {
         ...setup,
         providerIds: providers,
@@ -5587,7 +5669,14 @@ async function handleWerewolfAction() {
       };
       const response = await runtimeMessage({ type: "CREATE_WEREWOLF_GAME", setup: normalized });
       state.activeWerewolfGameId = response.gameId;
+      launch.gameId = response.gameId;
+      if (launch.cancelRequested) {
+        await runtimeMessage({ type: "DELETE_WEREWOLF_GAME", gameId: response.gameId });
+        state.activeWerewolfGameId = void 0;
+        return;
+      }
       await runtimeMessage({ type: "START_WEREWOLF_GAME", gameId: response.gameId });
+      if (launch.cancelRequested) await runtimeMessage({ type: "INTERRUPT_WEREWOLF_GAME", gameId: response.gameId });
       return;
     }
     if (game.status === "running" || game.status === "waiting_human") {
@@ -5604,9 +5693,16 @@ async function handleWerewolfAction() {
       renderMode();
       return;
     }
+    launch = { mode: "werewolf", cancelRequested: false, gameId: game.id };
+    pendingGameLaunch = launch;
+    renderWerewolfControls();
     await runtimeMessage({ type: "START_WEREWOLF_GAME", gameId: game.id });
+    if (launch.cancelRequested) await runtimeMessage({ type: "INTERRUPT_WEREWOLF_GAME", gameId: game.id });
   } catch (error) {
     showComposerError(error instanceof Error ? error.message : String(error));
+  } finally {
+    if (launch && pendingGameLaunch === launch) pendingGameLaunch = void 0;
+    if (state.activeMode === "werewolf") renderWerewolfControls();
   }
 }
 async function handleWerewolfHumanTextSend() {
@@ -5631,7 +5727,8 @@ function renderClocktowerControls() {
   humanSend.classList.toggle("hidden", !textTurn);
   attachmentTray.classList.add("hidden");
   messageInput.rows = 2;
-  messageInput.placeholder = game?.pendingHumanAction?.kind === "whisper" ? "\u8F93\u5165\u79C1\u804A\u5185\u5BB9\u2026" : textTurn ? "\u8F93\u5165\u4F60\u7684\u53D1\u8A00\u2026" : "\u8F93\u5165\u6D88\u606F\u2026";
+  messageInput.placeholder = game?.pendingHumanAction?.kind === "whisper" ? game.pendingHumanAction.metadata?.mode === "reply" ? "\u8F93\u5165\u4EC5\u5BF9\u53CC\u65B9\u53EF\u89C1\u7684\u79C1\u804A\u56DE\u590D\u2026" : "\u53EF\u9009\uFF1A\u8F93\u5165\u79C1\u804A\u5185\u5BB9\uFF08\u4EC5\u5BF9\u6307\u5B9A\u73A9\u5BB6\u53EF\u89C1\uFF09\u2026" : textTurn ? "\u8F93\u5165\u516C\u5F00\u53D1\u8A00\uFF08\u6240\u6709\u73A9\u5BB6\u53EF\u89C1\uFF09\u2026" : "\u8F93\u5165\u6D88\u606F\u2026";
+  if (gameLaunchButton("clocktower", actionButton, status)) return;
   if (!game) {
     actionButton.textContent = "\u5F00\u59CB";
     actionButton.classList.remove("danger");
@@ -5643,7 +5740,14 @@ function renderClocktowerControls() {
   status.textContent = clocktowerStatusLabel(game);
 }
 async function handleClocktowerAction() {
+  if (pendingGameLaunch?.mode === "clocktower") {
+    pendingGameLaunch.cancelRequested = true;
+    renderClocktowerControls();
+    return;
+  }
+  if (pendingGameLaunch) return;
   const game = activeClocktowerGame();
+  let launch;
   try {
     if (!game) {
       const setup = state.clocktowerSetup;
@@ -5651,12 +5755,23 @@ async function handleClocktowerAction() {
       const providers = state.settings.clocktowerProviders.filter((provider) => providerById[provider]?.enabled);
       if (providers.length < needed) return showComposerError(`\u5F53\u524D ${setup.playerCount} \u4EBA\u914D\u7F6E\u81F3\u5C11\u9700\u8981 ${needed} \u4E2A\u5DF2\u63A5\u5165 AI \u6A21\u578B`);
       const selectedProviders2 = providers.slice(0, needed);
+      launch = { mode: "clocktower", cancelRequested: false };
+      pendingGameLaunch = launch;
+      renderClocktowerControls();
       await refreshProviderAvailability(selectedProviders2, false);
+      if (launch.cancelRequested) return;
       rejectKnownBrokenProviders(selectedProviders2);
       const normalized = { ...setup, providerIds: selectedProviders2 };
       const response = await runtimeMessage({ type: "CREATE_CLOCKTOWER_GAME", setup: normalized });
       state.activeClocktowerGameId = response.gameId;
+      launch.gameId = response.gameId;
+      if (launch.cancelRequested) {
+        await runtimeMessage({ type: "DELETE_CLOCKTOWER_GAME", gameId: response.gameId });
+        state.activeClocktowerGameId = void 0;
+        return;
+      }
       await runtimeMessage({ type: "START_CLOCKTOWER_GAME", gameId: response.gameId });
+      if (launch.cancelRequested) await runtimeMessage({ type: "INTERRUPT_CLOCKTOWER_GAME", gameId: response.gameId });
       return;
     }
     if (game.status === "running" || game.status === "waiting_human") {
@@ -5664,7 +5779,11 @@ async function handleClocktowerAction() {
       return;
     }
     if (game.status === "error" && game.phase === "setup") {
+      launch = { mode: "clocktower", cancelRequested: false, gameId: game.id };
+      pendingGameLaunch = launch;
+      renderClocktowerControls();
       await runtimeMessage({ type: "START_CLOCKTOWER_GAME", gameId: game.id });
+      if (launch.cancelRequested) await runtimeMessage({ type: "INTERRUPT_CLOCKTOWER_GAME", gameId: game.id });
       return;
     }
     if (game.status === "paused" || game.status === "error") {
@@ -5677,9 +5796,16 @@ async function handleClocktowerAction() {
       renderMode();
       return;
     }
+    launch = { mode: "clocktower", cancelRequested: false, gameId: game.id };
+    pendingGameLaunch = launch;
+    renderClocktowerControls();
     await runtimeMessage({ type: "START_CLOCKTOWER_GAME", gameId: game.id });
+    if (launch.cancelRequested) await runtimeMessage({ type: "INTERRUPT_CLOCKTOWER_GAME", gameId: game.id });
   } catch (error) {
     showComposerError(error instanceof Error ? error.message : String(error));
+  } finally {
+    if (launch && pendingGameLaunch === launch) pendingGameLaunch = void 0;
+    if (state.activeMode === "clocktower") renderClocktowerControls();
   }
 }
 async function handleClocktowerHumanTextSend() {

@@ -179,6 +179,9 @@ export interface ClocktowerPendingTurn {
   retryCount: number;
   startedAt: number;
   phase: 'preparing' | 'active';
+  responseStartedAt?: number;
+  responseLastActivityAt?: number;
+  submissionUnconfirmedAt?: number;
   metadata?: Record<string, unknown>;
 }
 

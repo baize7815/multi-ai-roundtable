@@ -6,7 +6,7 @@ Use your signed-in AI websites for parallel answers, sequential discussions, exp
 
 **Author:** [@baize7815](https://github.com/baize7815) · Chrome MV3 · TypeScript · Free, non-commercial community project · [中文](README.md)
 
-> **Source v0.2.4** (`main`): Improves response monitoring, background scheduling, session cancellation and attachment persistence; adds expert presets, synthesis, recovery controls and wide-screen UI. The v0.2.4 GitHub Release ZIP has **not** been published. Download the available stable ZIP from Releases or build v0.2.4 from source. The source code is now maintained on `main`.
+> **Source v0.2.5** (`main`): Improves private game first-send confirmation and deduplicated recovery across ten AI sites, adds bounded real-window wake-ups for throttled background pages, and clarifies Fog Council private whispers versus public discussion. Engine tests pass, but live logged-in Chrome gameplay still needs verification. **No v0.2.5 GitHub Release ZIP is published by this source update**; use the available stable ZIP on Releases or build v0.2.5 from source. [Release notes](docs/RELEASE_NOTES_v0.2.5.md).
 
 ## Highlights
 
@@ -15,7 +15,7 @@ Use your signed-in AI websites for parallel answers, sequential discussions, exp
 - AI Roundtable: strict sequential relay and multiple discussion rounds.
 - Expert Team: private per-provider role presets for cooperative analysis.
 - AI Werewolf: hidden-role gameplay with deterministic state-machine adjudication.
-- AI Fog Council: the current `main` branch contains the locally restored classic game engine; full end-to-end game simulation remains unverified.
+- AI Fog Council: the classic game engine and deterministic full-game simulation are tested; real Chrome multi-window gameplay remains unverified.
 - Manual Qiniu S3 backup/restore for shared Expert Team and AI Chat prompts (credentials configured by the user, real cloud writes not verified).
 - Session recovery, interruption/resumption, separate per-provider conversations and final-only game response commits.
 

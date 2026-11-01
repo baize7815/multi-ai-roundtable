@@ -1,4 +1,4 @@
-import { noteMonitorActivity, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, setContentEditableText, setFileInputFiles, sleep, visible, waitForDomMutation } from './common';
+import { recoverStableProviderReply, noteMonitorActivity, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, setContentEditableText, setFileInputFiles, sleep, visible, waitForDomMutation } from './common';
 import type { ComposerPayload } from '../shared/types';
 
 const PROVIDER = 'kimi' as const;
@@ -94,6 +94,26 @@ function inputMatchesPayload(input: HTMLElement, text: string): boolean {
   return normalize(input.innerText || input.textContent || '') === normalize(text);
 }
 
+async function tryFinalize(operationId: string): Promise<boolean> {
+  if (activeOperationId !== operationId) return false;
+  const key = `${JOURNAL_PREFIX}${operationId}`;
+  const saved = await chrome.storage.local.get(key);
+  const marker = saved[key] as OperationJournal | undefined;
+  if (!marker || marker.operationId !== operationId || !Number.isInteger(marker.baselineCount)) return false;
+  return recoverStableProviderReply({
+    operationId, provider: PROVIDER,
+    readSnapshot: () => ({
+      owned: activeOperationId === operationId && responseCount() > marker.baselineCount,
+      text: readResponse(),
+      generating: !responseLooksComplete() && Boolean(findCancelButton())
+    }),
+    onFinalized: async () => {
+      monitorAbort += 1; activeOperationId = null;
+      await chrome.storage.local.remove(key).catch(() => undefined);
+    }
+  });
+}
+
 async function send(payload: ComposerPayload, operationId: string): Promise<void> {
   activeOperationId = operationId;
   monitorAbort += 1;
@@ -151,4 +171,4 @@ function ready(): boolean {
   try { return Boolean(findInput()); } catch { return false; }
 }
 
-installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, ready });
+installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, tryFinalize, ready });

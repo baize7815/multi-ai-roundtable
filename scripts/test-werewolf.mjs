@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
 const tempDir = '.tmp-werewolf-tests';
-const testEntries = ['werewolf-core.test', 'werewolf-engine.test', 'orchestrator-regression.test', 'expert-transfer.test', 'reply-foreground.test', 'qiniu-presets.test', 'attachment-store.test'];
+const testEntries = ['werewolf-core.test', 'werewolf-engine.test', 'orchestrator-regression.test', 'expert-transfer.test', 'reply-foreground.test', 'qiniu-presets.test', 'attachment-store.test', 'provider-events.test', 'provider-recovery-check.test', 'private-game-submission.test', 'game-reply-timing.test', 'private-game-focus.test', 'clocktower-phase-guide.test', 'clocktower-day-progression.test'];
 
 await rm(tempDir, { recursive: true, force: true });
 await mkdir(tempDir, { recursive: true });

@@ -1,7 +1,8 @@
 import type { AttachmentPayload, ComposerPayload, ProviderEvent, ProviderId } from '../shared/types';
 
 const operationKeepAlive = new Map<string, { port: chrome.runtime.Port; timer: number; releaseLock?: () => void }>();
-const operationPhases = new Map<string, 'sending' | 'monitoring' | 'completed' | 'error'>();
+const operationPhases = new Map<string, 'sending' | 'unconfirmed' | 'monitoring' | 'completed' | 'error'>();
+const privateGameOperations = new Set<string>();
 const terminalEvents = new Map<string, ProviderEvent>();
 const terminalDeliveries = new Map<string, Promise<void>>();
 const pendingDomChecks = new Set<() => void>();
@@ -123,7 +124,14 @@ function endOperationKeepAlive(operationId?: string): void {
 
 export function emitProviderEvent(event: ProviderEvent): void {
   if (event.operationId) beginOperationKeepAlive(event.operationId);
+  if (event.operationId && (event.type === 'PROVIDER_RESPONSE_COMPLETED' || event.type === 'PROVIDER_ERROR')) privateGameOperations.delete(event.operationId);
   if (event.operationId && (event.type === 'PROVIDER_RESPONSE_COMPLETED' || event.type === 'PROVIDER_ERROR')) {
+    // A successful final answer is stronger evidence than a later send/monitor
+    // cancellation error (possible when recovery finalizes the reply first).
+    if (event.type === 'PROVIDER_ERROR' && (
+      terminalEvents.get(event.operationId)?.type === 'PROVIDER_RESPONSE_COMPLETED'
+      || operationPhases.get(event.operationId) === 'completed'
+    )) return;
     operationPhases.set(event.operationId, event.type === 'PROVIDER_ERROR' ? 'error' : 'completed');
     terminalEvents.set(event.operationId, event);
     void deliverTerminalEvent(event);
@@ -168,10 +176,79 @@ export async function releaseProviderWake(operationId: string): Promise<void> {
   await chrome.runtime.sendMessage({ type: 'RELEASE_PROVIDER_WAKE', operationId }).catch(() => undefined);
 }
 
+
+export interface RecoverySnapshot {
+  owned: boolean;
+  text: string;
+  generating: boolean;
+}
+
+/**
+ * Recover a rendered *final* response after the hidden webpage's DOM timer
+ * stalls. Every adapter must establish per-operation ownership before this
+ * routine is called. No prompt is submitted, and private intermediate text is
+ * never committed to the game.
+ */
+const pendingRecoveryChecks = new Map<string, Promise<boolean>>();
+
+export async function recoverStableProviderReply(options: {
+  operationId: string;
+  provider: ProviderId;
+  readSnapshot: () => RecoverySnapshot | Promise<RecoverySnapshot>;
+  onFinalized: () => void | Promise<void>;
+  settleMs?: number;
+}): Promise<boolean> {
+  const previous = pendingRecoveryChecks.get(options.operationId);
+  if (previous) return previous;
+  const task = (async () => {
+    const first = await options.readSnapshot();
+    if (!first.owned || !first.text.trim() || first.generating) return false;
+    await sleep(options.settleMs ?? 1800);
+    const second = await options.readSnapshot();
+    if (!second.owned || second.generating || !second.text.trim() || second.text !== first.text) return false;
+    const terminal: ProviderEvent = {
+      type: 'PROVIDER_RESPONSE_COMPLETED',
+      provider: options.provider,
+      operationId: options.operationId,
+      text: second.text
+    };
+    // Commit the completed reply to durable storage *before* clearing the
+    // adapter's operation journal. If the content script or service worker
+    // dies here, the next watchdog can still replay the final answer.
+    await chrome.storage.local.set({ [`${TERMINAL_KEY_PREFIX}${options.operationId}`]: terminal });
+    // Invalidate the old polling task before it can send a late timeout error.
+    await options.onFinalized();
+    emitProviderEvent(terminal);
+    return true;
+  })();
+  pendingRecoveryChecks.set(options.operationId, task);
+  try { return await task; }
+  finally {
+    if (pendingRecoveryChecks.get(options.operationId) === task) pendingRecoveryChecks.delete(options.operationId);
+  }
+}
+
+export async function responseMatchesBaseline(operationId: string, provider: ProviderId, currentCount: number): Promise<boolean> {
+  const saved = await chrome.storage.local.get(`${BASELINE_KEY_PREFIX}${operationId}`);
+  const baseline = saved[`${BASELINE_KEY_PREFIX}${operationId}`] as ResponseBaseline | undefined;
+  return Boolean(baseline?.provider === provider
+    && baseline.url === location.href
+    && Number.isInteger(baseline.count)
+    && baseline.count >= 0
+    && currentCount > baseline.count);
+}
 export function composerTextMatches(actual: string, expected: string): boolean {
   // contenteditable can render paragraph separators as two or three newlines.
   const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
   return normalize(actual) === normalize(expected);
+}
+
+export function markProviderSubmissionUnconfirmed(operationId: string): void {
+  if (operationPhases.get(operationId) === 'sending') operationPhases.set(operationId, 'unconfirmed');
+}
+
+export function isPrivateGameOperation(operationId: string): boolean {
+  return privateGameOperations.has(operationId);
 }
 
 export async function confirmProviderSubmission(operationId: string, options: {
@@ -179,10 +256,31 @@ export async function confirmProviderSubmission(operationId: string, options: {
   retry: () => void;
   current: () => boolean;
   attemptTimeoutMs?: number;
+  privateGameTimeoutMs?: number;
 }): Promise<void> {
   let woke = false;
   try {
     nudgeProviderPage();
+    if (isPrivateGameOperation(operationId)) {
+      // A first click may already be in flight even if the webpage has not
+      // rendered its user-message bubble. Never click Send a second time in
+      // a private game. Keep observing after a bounded acknowledgement wait.
+      const deadline = Date.now() + (options.privateGameTimeoutMs ?? 30000);
+      while (Date.now() < deadline) {
+        if (!options.current()) throw new Error('AI 操作已中断');
+        if (options.submitted()) return;
+        if (!woke && Date.now() >= deadline - Math.min(12000, (options.privateGameTimeoutMs ?? 30000) / 2)) {
+          woke = true;
+          // An inaccessible wake channel is not evidence that Send failed.
+          await requestProviderWake(operationId).catch(() => undefined);
+        }
+        await waitForDomMutation(500);
+      }
+      if (!options.current()) throw new Error('AI 操作已中断');
+      if (options.submitted()) return;
+      markProviderSubmissionUnconfirmed(operationId);
+      return;
+    }
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const deadline = Date.now() + (options.attemptTimeoutMs ?? 2500);
       while (Date.now() < deadline) {
@@ -388,6 +486,7 @@ export interface ProviderHarnessOptions {
   send: (payload: ComposerPayload, operationId: string) => Promise<void>;
   cancel: (operationId?: string) => Promise<void>;
   resumeMonitor?: (operationId: string) => Promise<void>;
+  tryFinalize?: (operationId: string) => Promise<boolean>;
   ready?: () => boolean | Promise<boolean>;
 }
 
@@ -421,6 +520,7 @@ export function installProviderHarness(options: ProviderHarnessOptions): void {
     }
     if (message?.type === 'PROVIDER_SEND') {
       const operationId = String(message.operationId ?? crypto.randomUUID());
+      if (message.privateGame === true) privateGameOperations.add(operationId);
       if (operationPhases.has(operationId)) {
         checkDomNow();
         sendResponse({ success: true, phase: operationPhases.get(operationId) });
@@ -433,7 +533,23 @@ export function installProviderHarness(options: ProviderHarnessOptions): void {
           if (operationPhases.get(operationId) === 'sending') operationPhases.set(operationId, 'monitoring');
           sendResponse({ success: true, phase: operationPhases.get(operationId) });
         })
-        .catch((error: unknown) => {
+        .catch(async (error: unknown) => {
+          // A page may already have rendered its answer although its submit
+          // acknowledgement was lost. Check this operation's reply baseline
+          // before declaring the game failed.
+          const terminal = terminalEvents.get(operationId);
+          if (terminal?.type === 'PROVIDER_RESPONSE_COMPLETED') {
+            sendResponse({ success: true, phase: 'completed' });
+            return;
+          }
+          if (options.tryFinalize) {
+            try {
+              if (await options.tryFinalize(operationId)) {
+                sendResponse({ success: true, phase: 'completed' });
+                return;
+              }
+            } catch { /* use the original send error */ }
+          }
           const text = error instanceof Error ? error.message : String(error);
           emitProviderEvent({ type: 'PROVIDER_ERROR', provider: options.provider, operationId, error: text });
           sendResponse({ success: false, error: text });
@@ -441,6 +557,7 @@ export function installProviderHarness(options: ProviderHarnessOptions): void {
       return true;
     }
     if (message?.type === 'PROVIDER_CANCEL') {
+      if (message.operationId) privateGameOperations.delete(String(message.operationId));
       options.cancel(message.operationId)
         .then(() => {
           endOperationKeepAlive(message.operationId);
@@ -461,8 +578,14 @@ export function installProviderHarness(options: ProviderHarnessOptions): void {
           emitProviderEvent(terminal);
           return { success: true, phase: 'terminal' };
         }
+        // A stalled hidden tab may have finished rendering without its
+        // mutation timer firing. Probe the *current operation* before giving
+        // up. This never submits another prompt or reads an earlier reply.
+        if (message.tryFinalize === true && options.tryFinalize && await options.tryFinalize(operationId)) {
+          return { success: true, phase: 'terminal' };
+        }
         const phase = operationPhases.get(operationId);
-        if (phase && (phase !== 'monitoring' || !replyAccelerationEnabled || Date.now() - (monitorActivity.get(operationId) ?? 0) < 30000)) return { success: true, phase };
+        if (phase && ((phase !== 'monitoring' && phase !== 'unconfirmed') || !replyAccelerationEnabled || Date.now() - (monitorActivity.get(operationId) ?? 0) < 30000)) return { success: true, phase };
         if (!options.resumeMonitor) return { success: false, error: '当前网页不支持恢复监听' };
         operationPhases.set(operationId, 'monitoring');
         beginOperationKeepAlive(operationId);

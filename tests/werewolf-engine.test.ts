@@ -131,6 +131,11 @@ const pausedGame = await engine.createGame({
 await engine.startGame(pausedGame.id);
 const beforePause = (await loadState()).werewolfGames.find((game) => game.id === pausedGame.id)!;
 assert.ok(beforePause.pendingTurn, '暂停测试需要先进入一个 AI pending turn');
+const initialEventCount = beforePause.events.length;
+await engine.handleProviderEvent({ type: 'PROVIDER_RESPONSE_STARTED', provider: beforePause.pendingTurn!.provider, operationId: beforePause.pendingTurn!.operationId });
+const progressState = (await loadState()).werewolfGames.find((game) => game.id === pausedGame.id)!;
+assert.ok(progressState.pendingTurn?.responseStartedAt, '开始流式回复后应记录收包状态');
+assert.equal(progressState.events.length, initialEventCount, '流式回复不能暴露游戏秘密或提前提交事件');
 const cursorBeforePause = structuredClone(beforePause.cursor);
 const cancelBefore = cancelCount;
 await engine.interruptGame(pausedGame.id);

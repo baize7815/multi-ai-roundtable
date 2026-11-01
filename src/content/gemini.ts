@@ -1,4 +1,4 @@
-import { saveResponseBaseline, confirmResponseBaseline, restoreResponseBaseline, noteMonitorActivity, composerTextMatches, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, setFileInputFiles, sleep, visible, waitForDomMutation } from './common';
+import { recoverStableProviderReply, responseMatchesBaseline, saveResponseBaseline, confirmResponseBaseline, restoreResponseBaseline, noteMonitorActivity, composerTextMatches, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, setFileInputFiles, sleep, visible, waitForDomMutation } from './common';
 import type { AttachmentPayload, ComposerPayload } from '../shared/types';
 
 const PROVIDER = 'gemini' as const;
@@ -115,6 +115,21 @@ async function resumeMonitor(operationId: string): Promise<void> {
   startMonitor(operationId, generation, baselineCount);
 }
 
+async function tryFinalize(operationId: string): Promise<boolean> {
+  if (activeOperationId !== operationId
+      || !await responseMatchesBaseline(operationId, PROVIDER, responseElements().length)) return false;
+  return recoverStableProviderReply({
+    operationId,
+    provider: PROVIDER,
+    readSnapshot: () => ({
+      owned: activeOperationId === operationId,
+      text: readResponse(),
+      generating: generationActive()
+    }),
+    onFinalized: () => { monitorAbort += 1; activeOperationId = null; }
+  });
+}
+
 async function send(payload: ComposerPayload, operationId: string): Promise<void> {
   activeOperationId = operationId;
   monitorAbort += 1;
@@ -162,4 +177,4 @@ function ready(): boolean {
   try { return Boolean(findInput()); } catch { return false; }
 }
 
-installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, ready });
+installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, tryFinalize, ready });

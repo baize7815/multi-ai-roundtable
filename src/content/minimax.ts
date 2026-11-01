@@ -1,4 +1,4 @@
-import { noteMonitorActivity,
+import { recoverStableProviderReply, noteMonitorActivity,
   composerTextMatches,
   confirmProviderSubmission,
   elementToMarkdown,
@@ -353,6 +353,24 @@ function startMonitor(operationId: string, generation: number, marker: Operation
   });
 }
 
+async function tryFinalize(operationId: string): Promise<boolean> {
+  if (activeOperationId !== operationId) return false;
+  const marker = await loadJournal(operationId);
+  if (!marker) return false;
+  return recoverStableProviderReply({
+    operationId, provider: PROVIDER,
+    readSnapshot: () => ({
+      owned: activeOperationId === operationId && submissionConfirmed(marker) && Boolean(latestAssistant(marker)),
+      text: readResponse(marker),
+      generating: generationActive(marker)
+    }),
+    onFinalized: async () => {
+      monitorAbort += 1; activeOperationId = null;
+      await clearJournal(operationId);
+    }
+  });
+}
+
 async function send(payload: ComposerPayload, operationId: string): Promise<void> {
   if (payload.attachments.length) throw new Error('MiniMax 网页端附件需要动态上传流程，当前版本仅支持文字转发');
   activeOperationId = operationId;
@@ -437,4 +455,4 @@ function ready(): boolean {
   try { return Boolean(findInput()); } catch { return false; }
 }
 
-installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, ready });
+installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, tryFinalize, ready });

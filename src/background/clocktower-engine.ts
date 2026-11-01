@@ -39,7 +39,7 @@ import type {
 
 export interface ClocktowerProviderBridge {
   createFreshConversation(provider: ProviderId, preferredTabId?: number): Promise<{ tabId: number; conversationUrl?: string }>;
-  send(provider: ProviderId, operationId: string, payload: ComposerPayload, tabId?: number, conversationUrl?: string): Promise<{ tabId: number; conversationUrl?: string }>;
+  send(provider: ProviderId, operationId: string, payload: ComposerPayload, tabId?: number, conversationUrl?: string): Promise<{ tabId: number; conversationUrl?: string; submissionUnconfirmed?: boolean }>;
   cancel(provider: ProviderId, operationId?: string, tabId?: number): Promise<void>;
   closeTab(tabId: number): Promise<void>;
 }
@@ -858,6 +858,7 @@ export function createClocktowerEngine(bridge: ClocktowerProviderBridge) {
         const current = gameById(next, gameId);
         if (current.pendingTurn?.operationId !== pending.operationId) return;
         current.pendingTurn.phase = 'active';
+        current.pendingTurn.submissionUnconfirmedAt = actual.submissionUnconfirmed ? Date.now() : undefined;
         current.bindings[pending.playerId] = { provider: pending.provider, tabId: actual.tabId, conversationUrl: actual.conversationUrl };
         current.updatedAt = Date.now();
       });
@@ -895,7 +896,13 @@ export function createClocktowerEngine(bridge: ClocktowerProviderBridge) {
 
   function scheduleAdvance(gameId: string): Promise<void> {
     const tail = advanceTails.get(gameId) ?? Promise.resolve();
-    const next = tail.catch(() => undefined).then(() => advance(gameId));
+    // Real web replies naturally yield to the browser event loop. A fast
+    // simulated (or cached) reply must not create an endless microtask chain
+    // that starves timers, UI refreshes and the watchdog.
+    const next = tail.catch(() => undefined).then(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      return advance(gameId);
+    });
     advanceTails.set(gameId, next);
     const clear = () => { if (advanceTails.get(gameId) === next) advanceTails.delete(gameId); };
     void next.then(clear, clear);
@@ -1148,6 +1155,23 @@ export function createClocktowerEngine(bridge: ClocktowerProviderBridge) {
     const game = state.clocktowerGames.find((item) => item.pendingTurn?.operationId === event.operationId);
     const pending = game?.pendingTurn;
     if (!game || !pending || pending.provider !== event.provider) return false;
+    if (event.tabId && game.bindings[pending.playerId]?.tabId && game.bindings[pending.playerId]?.tabId !== event.tabId) return true;
+    if (event.type === 'PROVIDER_RESPONSE_STARTED' || event.type === 'PROVIDER_RESPONSE_DELTA') {
+      const now = Date.now();
+      if ((event.type === 'PROVIDER_RESPONSE_STARTED' || Boolean(event.text?.trim()))
+          && (!pending.responseStartedAt || now - (pending.responseLastActivityAt ?? 0) >= 15000)) {
+        const updated = await mutatePersistedState((next) => {
+          const current = gameById(next, game.id).pendingTurn;
+          if (!current || current.operationId !== pending.operationId) return false;
+          const first = !current.responseStartedAt;
+          current.responseStartedAt ??= now;
+          current.responseLastActivityAt = now;
+          return first;
+        });
+        if (updated) notify(game.id);
+      }
+      return true;
+    }
     if (event.type === 'PROVIDER_RESPONSE_COMPLETED') {
       const result = await completeTurn(game.id, pending, event.text ?? '');
       notify(game.id);

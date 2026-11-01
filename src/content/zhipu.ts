@@ -1,4 +1,4 @@
-import { saveResponseBaseline, confirmResponseBaseline, restoreResponseBaseline, noteMonitorActivity, composerTextMatches, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, setFileInputFiles, setTextareaText, sleep, visible, waitForDomMutation } from './common';
+import { recoverStableProviderReply, responseMatchesBaseline, saveResponseBaseline, confirmResponseBaseline, restoreResponseBaseline, noteMonitorActivity, composerTextMatches, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, setFileInputFiles, setTextareaText, sleep, visible, waitForDomMutation } from './common';
 import type { ComposerPayload } from '../shared/types';
 
 const PROVIDER = 'zhipu' as const;
@@ -137,6 +137,21 @@ async function monitorResponse(operationId: string, generation: number, baseline
   if (generation === monitorAbort) emitProviderEvent({ type: 'PROVIDER_ERROR', provider: PROVIDER, operationId, error: '智谱清言监听超时，未确认回复生成结束' });
 }
 
+async function tryFinalize(operationId: string): Promise<boolean> {
+  if (activeOperationId !== operationId
+      || !await responseMatchesBaseline(operationId, PROVIDER, responseCount())) return false;
+  return recoverStableProviderReply({
+    operationId,
+    provider: PROVIDER,
+    readSnapshot: () => ({
+      owned: activeOperationId === operationId,
+      text: readResponse(),
+      generating: Boolean(findCancelButton())
+    }),
+    onFinalized: () => { monitorAbort += 1; activeOperationId = null; }
+  });
+}
+
 async function send(payload: ComposerPayload, operationId: string): Promise<void> {
   activeOperationId = operationId;
   monitorAbort += 1;
@@ -202,4 +217,4 @@ function ready(): boolean {
   try { return Boolean(findInput()); } catch { return false; }
 }
 
-installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, ready });
+installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, tryFinalize, ready });

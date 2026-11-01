@@ -5,10 +5,12 @@ import { createBackgroundOrchestrator } from './background/orchestrator';
 import { stashPayloadAttachments, cleanupOrphanAttachments } from './background/attachments';
 import { updatePageFramePump } from './background/page-liveness';
 import { createReplyForeground } from './background/reply-foreground';
-import { createPrivateGameTab, forgetPrivateGameTab, isPrivateGameTab, preparePrivateGamePage, releaseInactivePrivateGamePages } from './background/private-game-pages';
+import { createPrivateGameTab, forgetPrivateGameTab, isPrivateGameTab, preparePrivateGamePage, pulsePrivateGamePage, releaseInactivePrivateGamePages } from './background/private-game-pages';
 import { createWerewolfEngine } from './background/werewolf-engine';
 import type { WerewolfGameSession, WerewolfPendingTurn } from './game/werewolf/types';
 import { createClocktowerEngine } from './background/clocktower-engine';
+import { acceptTerminalProviderEvent, isProviderReplyActivity, isTerminalProviderEvent, TERMINAL_RECEIPT_PREFIX } from './background/provider-events';
+import { gameReplyTiming, GAME_PREPARING_TIMEOUT_MS } from './background/game-reply-timing';
 import type { ClocktowerGameSession, ClocktowerPendingTurn } from './game/clocktower/types';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
@@ -35,6 +37,11 @@ const ISOLATION_MIGRATION_KEY = 'multiAiRoundtableIsolationMigrationV1';
 const PROVIDER_WATCHDOG_ALARM = 'multi-ai-provider-watchdog';
 const lastProviderActivity = new Map<string, number>();
 const sendingOperations = new Set<string>();
+// Focus pulses are expensive and briefly affect the user's Chrome focus.
+// Rate-limit across every game, not once per provider.
+let lastPrivateFocusPulseAt = 0;
+const PRIVATE_FOCUS_PULSE_COOLDOWN_MS = 25000;
+
 let wakeQueue: Promise<unknown> = Promise.resolve();
 let watchdogRunning = false;
 const commandInFlight = new Set<string>();
@@ -556,9 +563,16 @@ async function wakeOperation(operationId: string, requestedTabId?: number, onRea
         : clockOperation ? clockGame?.bindings[clockOperation.playerId]?.tabId : undefined;
     if (!provider || !tabId || (requestedTabId !== undefined && requestedTabId !== tabId) || !(await isManagedTab(tabId, provider))) throw new Error('本次 AI 操作已结束或标签绑定失效');
     if (gameOperation || clockOperation) {
-      // Hidden-game operations must never reveal their provider tab
-      // by forcing it to the foreground. A wake request is acknowledged as a
-      // no-op; the watchdog will pause the game if background execution stalls.
+      // Wake only the private game window's active tab, never the user's normal
+      // window. A bare successful ACK was previously a no-op, leaving hidden
+      // page submissions stalled indefinitely.
+      await preparePrivateGamePage(tabId, provider, true);
+      await startPageFramePump(tabId, provider);
+      // Chrome can throttle replies when the dedicated window never actually
+      // received OS focus. The window sits at the screen edge, and focus is
+      // restored immediately after this brief real-browser wakeup.
+      lastPrivateFocusPulseAt = Date.now();
+      await pulsePrivateGamePage(tabId, provider).catch(() => undefined);
       onReady?.();
       return;
     }
@@ -661,6 +675,45 @@ async function syncProviderWatchdogNow(): Promise<void> {
   }
 }
 
+// Before a watchdog pauses a private game, allow the content script to
+// recover a fully rendered reply from the original operation's baseline.
+// Never re-send the prompt or reuse a previous operation's rendered answer.
+async function gameTerminalRecovering(operationId: string, provider: ProviderId, tabId?: number): Promise<boolean> {
+  if (tabId) {
+    try {
+      const checked = await sendProviderMessage(tabId, provider, {
+        type: 'PROVIDER_CHECK', operationId, tryFinalize: true
+      }, 10000) as { success?: boolean; phase?: string } | undefined;
+      if (checked?.success && checked.phase === 'terminal') return true;
+    } catch { /* Still check the journal and current owner. */ }
+  }
+  await replayPendingTerminalEvents();
+  const latest = await loadState();
+  const stillPending = latest.werewolfGames.some((game) => gamePendingTurns(game).some((turn) => turn.operationId === operationId))
+    || latest.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((turn) => turn.operationId === operationId));
+  if (!stillPending) return true;
+  const key = `multiAiRoundtableTerminal:${operationId}`;
+  const journal = (await chrome.storage.local.get(key))[key] as ProviderEvent | undefined;
+  // Preserve an undelivered journal and retry its real owner, never report
+  // receipt merely because a record was found on disk.
+  if (journal?.operationId !== operationId || journal.provider !== provider) return false;
+  return routeProviderEvent({ ...journal, tabId }).catch(() => false);
+}
+
+async function pulseStalledPrivateReply(operationId: string, tabId: number, provider: ProviderId, lastActivityAt: number): Promise<void> {
+  if (Date.now() - lastActivityAt < 12000 || Date.now() - lastPrivateFocusPulseAt < PRIVATE_FOCUS_PULSE_COOLDOWN_MS) return;
+  // Respect the current operation's tab binding and avoid waking unrelated
+  // pages when a game was already interrupted or replaced.
+  const state = await loadState();
+  const bound = state.werewolfGames.some((game) => gamePendingTurns(game).some((turn) =>
+    turn.operationId === operationId && turn.provider === provider && game.bindings[turn.playerId]?.tabId === tabId))
+    || state.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((turn) =>
+      turn.operationId === operationId && turn.provider === provider && game.bindings[turn.playerId]?.tabId === tabId));
+  if (!bound) return;
+  lastPrivateFocusPulseAt = Date.now();
+  await pulsePrivateGamePage(tabId, provider).catch(() => undefined);
+}
+
 async function checkPendingProviders(): Promise<void> {
   if (watchdogRunning) return;
   watchdogRunning = true;
@@ -683,7 +736,7 @@ async function checkPendingProviders(): Promise<void> {
           const response = await sendProviderMessage(tabId, operation.provider, { type: 'PROVIDER_CHECK', operationId: operation.operationId }, 5000) as { success?: boolean; phase?: string; resumed?: boolean } | undefined;
           if (response?.success !== true) throw new Error('监听未恢复');
           if (response.phase === 'terminal') continue;
-          if (response.resumed) lastProviderActivity.set(operation.operationId, Date.now());
+          // Resuming a monitor does not prove the webpage produced any text.
           const lastActivity = lastProviderActivity.get(operation.operationId) ?? operation.startedAt;
           if (Date.now() - lastActivity >= 25000) await wakeOperation(operation.operationId);
         } catch {
@@ -696,29 +749,47 @@ async function checkPendingProviders(): Promise<void> {
     for (const game of state.werewolfGames) {
       for (const operation of gamePendingTurns(game)) {
         const tabId = game.bindings[operation.playerId]?.tabId;
-        if (!tabId || operation.phase === 'preparing') continue;
+        if (operation.phase === 'preparing') {
+          if (!sendingOperations.has(operation.operationId) && Date.now() - operation.startedAt >= GAME_PREPARING_TIMEOUT_MS
+              && !await gameTerminalRecovering(operation.operationId, operation.provider, tabId)) {
+            await werewolfEngine.handleProviderEvent({
+              type: 'PROVIDER_ERROR', provider: operation.provider, operationId: operation.operationId,
+              error: '准备发送阶段超过 180 秒，尚未确认提交，已安全暂停本局；不会自动重复发送。'
+            });
+          }
+          continue;
+        }
+        if (!tabId) continue;
         try {
           if (!await isManagedTab(tabId, operation.provider)) {
             await werewolfEngine.handleProviderEvent({ type: 'PROVIDER_ERROR', provider: operation.provider, operationId: operation.operationId, error: '游戏网页绑定失效，已暂停本局，避免操作无关网页或重复发送。' });
             continue;
           }
-          await preparePrivateGamePage(tabId, operation.provider);
+          await preparePrivateGamePage(tabId, operation.provider, false);
           await startPageFramePump(tabId, operation.provider);
           if (sendingOperations.has(operation.operationId)) continue;
-          const response = await sendProviderMessage(tabId, operation.provider, { type: 'PROVIDER_CHECK', operationId: operation.operationId }, 5000) as { success?: boolean; phase?: string; resumed?: boolean } | undefined;
+          const lastActivity = gameReplyTiming(operation, lastProviderActivity.get(operation.operationId)).lastActivityAt;
+          const probeFinal = Date.now() - lastActivity >= 12000;
+          if (probeFinal) await pulseStalledPrivateReply(operation.operationId, tabId, operation.provider, lastActivity);
+          const response = await sendProviderMessage(tabId, operation.provider,
+            { type: 'PROVIDER_CHECK', operationId: operation.operationId, tryFinalize: probeFinal },
+            probeFinal ? 10000 : 5000) as { success?: boolean; phase?: string; resumed?: boolean } | undefined;
           if (response?.success !== true) throw new Error('监听未恢复');
           if (response.phase === 'terminal') continue;
-          if (response.resumed) lastProviderActivity.set(operation.operationId, Date.now());
+          // A restored observer is not a reply and cannot extend this timeout.
         } catch {
           await resumePendingOperationsForTab(tabId).catch(() => undefined);
         }
-        const lastActivity = lastProviderActivity.get(operation.operationId) ?? operation.startedAt;
-        if (Date.now() - lastActivity >= 3 * 60 * 1000) {
+        const timing = gameReplyTiming(operation, lastProviderActivity.get(operation.operationId));
+        if (timing.timedOut
+            && !await gameTerminalRecovering(operation.operationId, operation.provider, tabId)) {
           await werewolfEngine.handleProviderEvent({
             type: 'PROVIDER_ERROR',
             provider: operation.provider,
             operationId: operation.operationId,
-            error: '后台 AI 页面长时间无响应，已暂停本局。为避免泄露身份，狼人杀不会自动切换到对应网页。'
+            error: timing.unconfirmedWithoutReply
+              ? '网页发送未确认且 180 秒内无回复，未重复发送；已暂停本局。'
+              : '后台 AI 页面长时间无响应，已暂停本局。为避免泄露身份，狼人杀不会自动切换到对应网页。'
           });
         }
       }
@@ -726,38 +797,47 @@ async function checkPendingProviders(): Promise<void> {
     for (const game of state.clocktowerGames) {
       for (const operation of clocktowerPendingTurns(game)) {
         const tabId = game.bindings[operation.playerId]?.tabId;
+        if (operation.phase === 'preparing') {
+          if (!sendingOperations.has(operation.operationId) && Date.now() - operation.startedAt >= GAME_PREPARING_TIMEOUT_MS
+              && !await gameTerminalRecovering(operation.operationId, operation.provider, tabId)) {
+            await clocktowerEngine.handleProviderEvent({
+              type: 'PROVIDER_ERROR', provider: operation.provider, operationId: operation.operationId,
+              error: '准备发送阶段超过 180 秒，尚未确认提交，已安全暂停本局；不会自动重复发送。'
+            });
+          }
+          continue;
+        }
         if (!tabId) continue;
         try {
           if (!await isManagedTab(tabId, operation.provider)) {
             await clocktowerEngine.handleProviderEvent({ type: 'PROVIDER_ERROR', provider: operation.provider, operationId: operation.operationId, error: '游戏网页绑定失效，已暂停本局，避免操作无关网页或重复发送。' });
             continue;
           }
-          await preparePrivateGamePage(tabId, operation.provider);
+          await preparePrivateGamePage(tabId, operation.provider, false);
           await startPageFramePump(tabId, operation.provider);
           if (sendingOperations.has(operation.operationId)) continue;
-          const response = await sendProviderMessage(tabId, operation.provider, { type: 'PROVIDER_CHECK', operationId: operation.operationId }, 5000) as { success?: boolean; phase?: string; resumed?: boolean } | undefined;
+          const lastActivity = gameReplyTiming(operation, lastProviderActivity.get(operation.operationId)).lastActivityAt;
+          const probeFinal = Date.now() - lastActivity >= 12000;
+          if (probeFinal) await pulseStalledPrivateReply(operation.operationId, tabId, operation.provider, lastActivity);
+          const response = await sendProviderMessage(tabId, operation.provider,
+            { type: 'PROVIDER_CHECK', operationId: operation.operationId, tryFinalize: probeFinal },
+            probeFinal ? 10000 : 5000) as { success?: boolean; phase?: string; resumed?: boolean } | undefined;
           if (response?.success !== true) throw new Error('监听未恢复');
           if (response.phase === 'terminal') continue;
-          if (response.resumed) lastProviderActivity.set(operation.operationId, Date.now());
+          // A restored observer is not a reply and cannot extend this timeout.
         } catch {
-          if (operation.phase === 'preparing') {
-            await clocktowerEngine.handleProviderEvent({
-              type: 'PROVIDER_ERROR',
-              provider: operation.provider,
-              operationId: operation.operationId,
-              error: '恢复时无法确认这次迷雾议会操作是否已经提交；为避免重复发送，已暂停本局。'
-            });
-            continue;
-          }
           await resumePendingOperationsForTab(tabId).catch(() => undefined);
         }
-        const lastActivity = lastProviderActivity.get(operation.operationId) ?? operation.startedAt;
-        if (Date.now() - lastActivity >= 3 * 60 * 1000) {
+        const timing = gameReplyTiming(operation, lastProviderActivity.get(operation.operationId));
+        if (timing.timedOut
+            && !await gameTerminalRecovering(operation.operationId, operation.provider, tabId)) {
           await clocktowerEngine.handleProviderEvent({
             type: 'PROVIDER_ERROR',
             provider: operation.provider,
             operationId: operation.operationId,
-            error: '后台 AI 页面长时间无响应，已暂停本局。为避免泄露私密信息，迷雾议会不会自动切换到对应网页。'
+            error: timing.unconfirmedWithoutReply
+              ? '网页发送未确认且 180 秒内无回复，未重复发送；已暂停本局。'
+              : '后台 AI 页面长时间无响应，已暂停本局。为避免泄露私密信息，迷雾议会不会自动切换到对应网页。'
           });
         }
       }
@@ -774,6 +854,7 @@ async function waitForProviderReady(tabId: number, provider: ProviderId, timeout
   allowForegroundWake = allowForegroundWake && !replyAccelerationEnabled;
   await startPageFramePump(tabId, provider).catch(() => undefined);
   const deadline = Date.now() + timeoutMs;
+  let privateReadySince = 0;
   const wakeAt = Date.now() + Math.min(6000, Math.max(2000, Math.floor(timeoutMs / 3)));
   let lastError: unknown;
   let restoreWake: (() => Promise<void>) | undefined;
@@ -800,9 +881,15 @@ async function waitForProviderReady(tabId: number, provider: ProviderId, timeout
           throw new Error('正在更新 AI 网页控制脚本');
         }
         if (response?.success === true && tab.status === 'complete') {
-          await startPageFramePump(tabId, provider).catch(() => undefined);
-          return;
-        }
+          // A newly rendered input may appear before its framework attaches
+          // click/keyboard handlers. Require two positive readiness probes
+          // spaced apart for a private game, not merely the first input.
+          if (!privatePage || (privateReadySince && Date.now() - privateReadySince >= 1200)) {
+            await startPageFramePump(tabId, provider).catch(() => undefined);
+            return;
+          }
+          if (!privateReadySince) privateReadySince = Date.now();
+        } else privateReadySince = 0;
       } catch (error) {
         lastError = error;
       }
@@ -831,7 +918,7 @@ async function sendProviderOperation(
   onBinding?: (tabId: number, conversationUrl?: string) => Promise<void>,
   allowForegroundWake = true,
   mode: ConversationMode = 'roundtable'
-): Promise<{ tabId: number; conversationUrl?: string }> {
+): Promise<{ tabId: number; conversationUrl?: string; submissionUnconfirmed?: boolean }> {
   sendingOperations.add(operationId);
   try {
     const tab = await resolveProviderTab(provider, preferredTabId, preferredUrl, allowForegroundWake, mode);
@@ -844,7 +931,8 @@ async function sendProviderOperation(
       response = await sendProviderMessage(tab.id, provider, {
         type: 'PROVIDER_SEND',
         operationId,
-        payload
+        payload,
+        privateGame: !allowForegroundWake
       }, allowForegroundWake ? undefined : 90000);
     } catch (error) {
       if (!isNavigationChannelClosed(error)) throw error;
@@ -856,7 +944,7 @@ async function sendProviderOperation(
     }
     if (response?.success !== true) throw new Error(response?.error || `${provider} 页面未确认发送`);
     const refreshed = await chrome.tabs.get(tab.id).catch(() => tab);
-    return { tabId: tab.id, conversationUrl: refreshed.url ?? tab.url };
+    return { tabId: tab.id, conversationUrl: refreshed.url ?? tab.url, submissionUnconfirmed: response.phase === 'unconfirmed' };
   } finally { sendingOperations.delete(operationId); }
 }
 
@@ -911,7 +999,20 @@ const clocktowerEngine = createClocktowerEngine({
   closeTab: async (tabId) => { await chrome.tabs.remove(tabId).catch(() => undefined); }
 });
 
-async function routeProviderEvent(event: ProviderEvent): Promise<void> {
+async function routeProviderEvent(event: ProviderEvent): Promise<boolean> {
+  if (isTerminalProviderEvent(event)) {
+    return acceptTerminalProviderEvent(event, {
+      loadState,
+      readReceipt: async (key) => (await chrome.storage.local.get(key))[key],
+      writeReceipt: async (key, value) => { await chrome.storage.local.set({ [key]: value }); },
+      dispatch: async (owner, terminal) => {
+        if (owner === 'werewolf') return werewolfEngine.handleProviderEvent(terminal);
+        if (owner === 'clocktower') return clocktowerEngine.handleProviderEvent(terminal);
+        await orchestrator.handleProviderEvent(terminal);
+        return true;
+      }
+    });
+  }
   const handled = await werewolfEngine.handleProviderEvent(event) || await clocktowerEngine.handleProviderEvent(event);
   if (!handled) {
     await orchestrator.handleProviderEvent(event);
@@ -919,6 +1020,7 @@ async function routeProviderEvent(event: ProviderEvent): Promise<void> {
       await foregroundReplies.sync(await loadState(), event.tabId).catch(() => undefined);
     }
   }
+  return true;
 }
 
 // Recover a final reply even if its content script's message channel closed or
@@ -945,9 +1047,20 @@ async function replayPendingTerminalEvents(state?: PersistedState): Promise<void
     const event = saved[key] as ProviderEvent | undefined;
     if (!event || event.operationId !== owner.operationId || event.provider !== owner.provider
       || (event.type !== 'PROVIDER_RESPONSE_COMPLETED' && event.type !== 'PROVIDER_ERROR')) continue;
-    await routeProviderEvent({ ...event, tabId: owner.tabId });
-    await chrome.storage.local.remove([key, `multiAiRoundtableResponseBaseline:${owner.operationId}`]);
+    if (await routeProviderEvent({ ...event, tabId: owner.tabId })) {
+      await chrome.storage.local.remove([key, `multiAiRoundtableResponseBaseline:${owner.operationId}`]);
+    }
   }
+}
+
+async function cleanupOldTerminalReceipts(): Promise<void> {
+  const saved = await chrome.storage.local.get(null);
+  const expired = Object.entries(saved)
+    .filter(([key, value]) => key.startsWith(TERMINAL_RECEIPT_PREFIX)
+      && typeof (value as { completedAt?: number })?.completedAt === 'number'
+      && Date.now() - (value as { completedAt: number }).completedAt > 7 * 24 * 60 * 60 * 1000)
+    .map(([key]) => key);
+  if (expired.length) await chrome.storage.local.remove(expired);
 }
 
 async function acceleratePendingReplies(): Promise<void> {
@@ -960,14 +1073,24 @@ async function acceleratePendingReplies(): Promise<void> {
     // Hidden pages can throttle their timers too. Pump game rendering from
     // the worker without checking, resuming or submitting an AI operation.
     const privateTargets = [
-      ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId }))),
-      ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId })))
+      ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => ({ operation, provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId }))),
+      ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => ({ operation, provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId })))
     ];
     await Promise.allSettled(privateTargets.map(async ({ tabId, provider }) => {
       if (!tabId || !await isManagedTab(tabId, provider)) return;
-      await preparePrivateGamePage(tabId, provider);
+      // Do not steal focus from a private provider tab whose send click is in flight.
+      await preparePrivateGamePage(tabId, provider, false);
       await startPageFramePump(tabId, provider);
     }));
+    // The normal watchdog alarm is only every 30s. Try the bounded real-focus
+    // pulse sooner for a stalled private webpage, without sending any prompt.
+    const stalled = privateTargets.find(({ operation, tabId }) => tabId && operation.phase === 'active'
+      && !sendingOperations.has(operation.operationId)
+      && Date.now() - gameReplyTiming(operation, lastProviderActivity.get(operation.operationId)).lastActivityAt >= 12000);
+    if (stalled?.tabId) await pulseStalledPrivateReply(
+      stalled.operation.operationId, stalled.tabId, stalled.provider,
+      gameReplyTiming(stalled.operation, lastProviderActivity.get(stalled.operation.operationId)).lastActivityAt
+    );
     const targets = [
       ...state.conversations.flatMap((session) => Object.values(session.pendingOperations ?? {}).map((operation) => ({ operation, tabId: session.bindings[operation.provider]?.tabId })))
     ];
@@ -1082,6 +1205,7 @@ void (async () => {
   await clocktowerEngine.recover();
   await recoverQueuedCommands();
   void cleanupUnusedAttachmentData().catch(console.warn);
+  void cleanupOldTerminalReceipts().catch(console.warn);
   await syncProviderWatchdog();
   await checkPendingProviders();
 })();
@@ -1095,9 +1219,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const event = message.event as ProviderEvent;
     event.tabId = sender.tab?.id;
     event.url = sender.tab?.url;
-    if (event.operationId) lastProviderActivity.set(event.operationId, Date.now());
+    if (event.operationId && isProviderReplyActivity(event)) lastProviderActivity.set(event.operationId, Date.now());
     routeProviderEvent(event)
-      .then(() => sendResponse({ success: true }))
+      .then((accepted) => sendResponse({ success: accepted }))
       .catch((error: unknown) => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   }

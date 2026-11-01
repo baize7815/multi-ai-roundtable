@@ -1,4 +1,4 @@
-import { noteMonitorActivity,
+import { recoverStableProviderReply, noteMonitorActivity,
   elementToMarkdown,
   emitProviderEvent,
   confirmProviderSubmission,
@@ -231,6 +231,27 @@ function startMonitor(operationId: string, generation: number, marker: MonitorMa
   });
 }
 
+async function tryFinalize(operationId: string): Promise<boolean> {
+  if (activeOperationId !== operationId) return false;
+  const marker = await loadMarker(operationId);
+  if (!marker) return false;
+  return recoverStableProviderReply({
+    operationId, provider: PROVIDER,
+    readSnapshot: () => {
+      const pair = findPair(marker);
+      return {
+        owned: activeOperationId === operationId && Boolean(pair),
+        text: pair ? readResponse(pair) : '',
+        generating: generationActive(pair)
+      };
+    },
+    onFinalized: async () => {
+      monitorAbort += 1; activeOperationId = null;
+      await clearMarker(operationId);
+    }
+  });
+}
+
 async function send(payload: ComposerPayload, operationId: string): Promise<void> {
   if (payload.attachments.length) throw new Error('文心网页端附件入口由动态工具控制，当前版本仅支持文字转发');
   activeOperationId = operationId;
@@ -324,4 +345,4 @@ function ready(): boolean {
   try { return Boolean(findInput()); } catch { return false; }
 }
 
-installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, ready });
+installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, tryFinalize, ready });

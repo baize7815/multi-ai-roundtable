@@ -159,13 +159,50 @@ export function preparePrivateGamePage(tabId: number, provider: ProviderId, acti
   });
 }
 
+
+/**
+ * A few provider websites flush already-generated replies only after Chrome
+ * delivers a real focus event. A synthetic DOM focus/visibility event cannot
+ * override the browser's own page scheduling policy.
+ *
+ * Restrict the focus pulse to the dedicated edge-peeking game window, restore
+ * the previously focused Chrome window, and never touch a regular AI tab.
+ * Skip the pulse when a different application is in the foreground.
+ */
+export function pulsePrivateGamePage(tabId: number, provider: ProviderId, durationMs = 900): Promise<boolean> {
+  return serial(async () => {
+    if (!await isPrivateGameTab(tabId, provider)) return false;
+    const target = await ownedWindow();
+    if (!target?.id) return false;
+    const focused = (await chrome.windows.getAll({ windowTypes: ['normal'] })).find((window) => window.focused);
+    if (focused?.id === target.id) return true;
+    if (focused?.id === undefined) return false;
+    const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+    if (!tab || tab.windowId !== target.id) return false;
+    try {
+      await wakeWindow(target.id);
+      await chrome.tabs.update(tabId, { active: true, autoDiscardable: false });
+      await chrome.windows.update(target.id, { focused: true });
+      await new Promise((resolve) => setTimeout(resolve, durationMs));
+      return true;
+    } finally {
+      // Never override a window switch the user made during the brief pulse.
+      const current = (await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => []))
+        .find((window) => window.focused);
+      if (current?.id === target.id) {
+        await chrome.windows.update(focused.id, { focused: true }).catch(() => undefined);
+      }
+    }
+  });
+}
 export function releaseInactivePrivateGamePages(keep: Set<number>): Promise<void> {
   return serial(async () => {
     const target = await ownedWindow();
     const currentRecord = await record();
     if (!target?.id || !currentRecord) return;
     const ownedTabs = await chrome.tabs.query({ windowId: target.id });
-    const keepTab = [...keep].find((tabId) => ownedTabs.some((tab) => tab.id === tabId));
+    const activeOwned = ownedTabs.find((tab) => tab.active && tab.id !== undefined && keep.has(tab.id));
+    const keepTab = activeOwned?.id ?? [...keep].find((tabId) => ownedTabs.some((tab) => tab.id === tabId));
     if (keepTab !== undefined) {
       await wakeWindow(target.id);
       await chrome.tabs.update(keepTab, { active: true, autoDiscardable: false }).catch(() => undefined);

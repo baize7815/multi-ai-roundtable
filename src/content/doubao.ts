@@ -1,4 +1,4 @@
-import { noteMonitorActivity, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, releaseProviderWake, requestProviderWake, responseCompletionReady, setContentEditableText, setFileInputFiles, setTextareaText, sleep, visible, waitForDomMutation } from './common';
+import { isPrivateGameOperation, markProviderSubmissionUnconfirmed, recoverStableProviderReply, noteMonitorActivity, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, releaseProviderWake, requestProviderWake, responseCompletionReady, setContentEditableText, setFileInputFiles, setTextareaText, sleep, visible, waitForDomMutation } from './common';
 import type { ComposerPayload } from '../shared/types';
 
 const PROVIDER = 'doubao' as const;
@@ -229,6 +229,43 @@ async function monitorResponse(journal: OperationJournal, generation: number): P
 }
 
 async function submit(journal: OperationJournal, generation: number): Promise<void> {
+  if (isPrivateGameOperation(journal.operationId) || journal.submissionAttempted) {
+    // The user's game must not re-click after an uncertain first submission.
+    // Doubao sometimes clears the input before rendering the user bubble,
+    // especially in a private background window.
+    let confirmed = submissionConfirmed(journal);
+    if (!confirmed && !journal.submissionAttempted) {
+      const input = await waitForInput();
+      if (!isCurrent(journal.operationId, generation)) throw new Error('豆包操作已中断');
+      if (normalized(inputText(input)) !== normalized(journal.sentText)) {
+        if (inputText(input).trim()) throw new Error('豆包输入框已被修改，停止发送以免覆盖内容');
+        setInputText(input, journal.sentText);
+      }
+      let button: HTMLElement | null = null;
+      for (let attempt = 0; attempt < 35 && !button; attempt += 1) {
+        await sleep(150);
+        button = findSendButton(input);
+      }
+      if (!isCurrent(journal.operationId, generation)) throw new Error('豆包操作已中断');
+      journal.submissionAttempted = true;
+      await saveJournal(journal);
+      if (button) button.click();
+      else {
+        input.focus();
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+        input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      }
+    }
+    if (!confirmed) confirmed = await waitForSendAck(journal, generation, 30000);
+    if (!confirmed) markProviderSubmissionUnconfirmed(journal.operationId);
+    journal.phase = 'monitoring';
+    await saveJournal(journal);
+    void monitorResponse(journal, generation).catch((error: unknown) => {
+      if (isCurrent(journal.operationId, generation))
+        emitProviderEvent({ type: 'PROVIDER_ERROR', provider: PROVIDER, operationId: journal.operationId, error: error instanceof Error ? error.message : String(error) });
+    });
+    return;
+  }
   let acknowledged = false;
   let woke = false;
   try {
@@ -286,6 +323,34 @@ async function submit(journal: OperationJournal, generation: number): Promise<vo
   });
 }
 
+async function tryFinalize(operationId: string): Promise<boolean> {
+  if (activeOperationId !== operationId) return false;
+  const key = `${JOURNAL_PREFIX}${operationId}`;
+  const saved = await chrome.storage.local.get(key);
+  const journal = saved[key] as OperationJournal | undefined;
+  if (!journal || journal.operationId !== operationId) return false;
+  return recoverStableProviderReply({
+    operationId, provider: PROVIDER,
+    readSnapshot: () => {
+      const text = readResponse();
+      let submitted = false;
+      try { submitted = submissionConfirmed(journal); } catch { /* page is not ready */ }
+      const belongs = assistantMessages().length > journal.baselineCount
+        || (submitted && normalized(text) !== normalized(journal.baselineText)
+          && normalized(text) !== normalized(journal.sentText));
+      return {
+        owned: activeOperationId === operationId && submitted && belongs,
+        text,
+        generating: responseStillStreaming() || (!responseLooksComplete() && Boolean(findCancelButton()))
+      };
+    },
+    onFinalized: async () => {
+      monitorAbort += 1; activeOperationId = null;
+      await chrome.storage.local.remove(key).catch(() => undefined);
+    }
+  });
+}
+
 async function send(payload: ComposerPayload, operationId: string): Promise<void> {
   activeOperationId = operationId;
   const generation = ++monitorAbort;
@@ -321,4 +386,4 @@ function ready(): boolean {
   return Boolean(findInput());
 }
 
-installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, ready });
+installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, tryFinalize, ready });

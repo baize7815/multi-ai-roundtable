@@ -6,7 +6,7 @@
 Project owner: https://github.com/baize7815
 Repository: https://github.com/baize7815/multi-ai-roundtable
 License: Apache-2.0 for original project code.
-Current source version: 0.2.4 (main). GitHub Releases may lag behind the source.
+Current source version: 0.2.5 (main). GitHub Releases may lag behind the source.
 
 ## Architecture
 - src/background/orchestrator.ts: parallel AI chat, sequential roundtable and expert workflows.
@@ -27,7 +27,7 @@ Current source version: 0.2.4 (main). GitHub Releases may lag behind the source.
 - npm run typecheck
 - npm run test:werewolf
 - node scripts/test-clocktower-core.mjs
-- npm run test:clocktower  # complete simulation may time out
+- npm run test:clocktower  # deterministic engine simulation (real browser use still requires verification)
 - npm run build
 
 ## Usage and safety

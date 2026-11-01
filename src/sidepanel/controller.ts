@@ -9,6 +9,7 @@ import { humanVisibleEvents } from '../game/werewolf/context';
 import { ROLE_LABELS } from '../game/werewolf/rules';
 import type { WerewolfActionType, WerewolfGameSession, WerewolfPendingHumanAction, WerewolfSetupSettings } from '../game/werewolf/types';
 import { clocktowerRoleById, TROUBLE_BREWING_ROLES } from '../game/clocktower/scripts';
+import { clocktowerPhaseGuide } from '../game/clocktower/phase-guide';
 import { publiclyAlive } from '../game/clocktower/core';
 import type {
   ClocktowerActionType,
@@ -512,14 +513,29 @@ function renderWerewolfGame(game: WerewolfGameSession): void {
   if (game.pendingTurn || game.pendingParallelTurns?.length) {
     const thinking = document.createElement('div');
     thinking.className = 'werewolf-thinking';
-    thinking.textContent = game.phase === 'day_vote' || game.phase === 'day_tiebreak_vote'
+    const current = game.pendingTurn ?? game.pendingParallelTurns?.[0];
+    const progress = current?.phase === 'preparing' ? '正在发送指令'
+      : current?.responseStartedAt ? '已收到回复，等待生成完成' : current?.submissionUnconfirmedAt ? '发送未获确认，持续监听网页回复' : '已发送，等待网页回复';
+    thinking.textContent = (game.phase === 'day_vote' || game.phase === 'day_tiebreak_vote'
       ? `投票处理中…${game.pendingParallelTurns?.length ? ` 剩余 ${game.pendingParallelTurns.length + (game.pendingHumanAction ? 1 : 0)} 票` : ''}`
       : canRevealPendingWerewolfActor(game)
       ? `${game.pendingTurn!.seat}号 · ${providerLabel(game.pendingTurn!.provider)} 正在思考…`
       : game.phase.startsWith('wolf_') || game.phase === 'seer_action' || game.phase === 'witch_action' || game.phase === 'night_start' || game.phase === 'night_resolution'
           ? werewolfProgressLabel(game)
-          : '游戏处理中…';
+          : '游戏处理中…') + ` · ${progress}`;
     dashboard.append(thinking);
+  }
+  if ((game.status === 'paused' || game.status === 'error') && game.lastError) {
+    const failure = document.createElement('div');
+    failure.className = 'werewolf-thinking';
+    failure.style.color = 'var(--danger)';
+    // Avoid revealing a hidden player's seat or role through an error string.
+    const privatePhase = game.phase.startsWith('wolf_') || game.phase.startsWith('night_')
+      || game.phase === 'seer_action' || game.phase === 'witch_action';
+    failure.textContent = privatePhase
+      ? privateGameErrorSummary(game.lastError)
+      : game.lastError;
+    dashboard.append(failure);
   }
   if (game.pendingHumanAction) renderHumanActionPanel(game, game.pendingHumanAction, dashboard);
   messagesEl.append(dashboard);
@@ -542,7 +558,7 @@ function clocktowerPhaseLabel(game: ClocktowerGameSession): string {
     first_night: '第一夜',
     other_night: `第 ${game.day} 夜`,
     dawn: `第 ${game.day} 天天亮`,
-    day_whispers: '私聊阶段',
+    day_whispers: '白天·可选私聊（公开发言前）',
     day_discussion: '公开讨论',
     nomination: '提名阶段',
     accusation: '指控',
@@ -652,6 +668,16 @@ function renderClocktowerHumanActionPanel(game: ClocktowerGameSession, pending: 
   intro.style.color = 'var(--muted)';
   intro.textContent = pending.prompt.includes('[CURRENT TURN]') ? `轮到你行动 · ${clocktowerPhaseLabel(game)}` : pending.prompt;
   panel.append(intro);
+  const guide = clocktowerPhaseGuide(game.phase, pending);
+  if (guide) {
+    const explanation = document.createElement('p');
+    explanation.className = 'clocktower-phase-guide';
+    explanation.style.fontSize = '11px';
+    explanation.style.color = 'var(--muted)';
+    explanation.style.width = '100%';
+    explanation.textContent = guide;
+    panel.append(explanation);
+  }
 
   const submitDirect = (actionType: ClocktowerActionType, targetSeats?: number[]) => void submitClocktowerHumanAction({ actionType, targetSeats });
   if (pending.expectedActions.includes('vote_yes')) {
@@ -705,7 +731,7 @@ function renderClocktowerHumanActionPanel(game: ClocktowerGameSession, pending: 
     const pass = document.createElement('button');
     pass.type = 'button';
     pass.className = 'clocktower-target-button';
-    pass.textContent = '跳过';
+    pass.textContent = pending.kind === 'whisper' ? '跳过私聊（继续白天）' : '跳过';
     pass.addEventListener('click', () => submitDirect('pass'));
     panel.append(pass);
   }
@@ -714,7 +740,7 @@ function renderClocktowerHumanActionPanel(game: ClocktowerGameSession, pending: 
     hint.style.width = '100%';
     hint.style.fontSize = '10px';
     hint.style.color = 'var(--muted)';
-    hint.textContent = '先在下方输入私聊内容，再选择目标座位。';
+    hint.textContent = '可选：先输入仅对双方可见的内容，再选一名私聊对象并点击提交；跳过则进入后续流程。';
     panel.append(hint);
     for (const target of pending.allowedTargets) {
       const button = document.createElement('button');
@@ -839,8 +865,19 @@ function renderClocktowerGame(game: ClocktowerGameSession): void {
     const thinking = document.createElement('div');
     thinking.className = 'werewolf-thinking';
     const hidden = game.phase === 'first_night' || game.phase === 'other_night';
-    thinking.textContent = hidden ? '夜间行动处理中…' : `${game.pendingTurn.seat}号正在行动…`;
+    const progress = game.pendingTurn.phase === 'preparing' ? '正在发送指令'
+      : game.pendingTurn.responseStartedAt ? '已收到回复，等待生成完成' : game.pendingTurn.submissionUnconfirmedAt ? '发送未获确认，持续监听网页回复' : '已发送，等待网页回复';
+    thinking.textContent = (hidden ? '夜间行动处理中…' : `${game.pendingTurn.seat}号正在行动…`) + ` · ${progress}`;
     dashboard.append(thinking);
+  }
+  if ((game.status === 'paused' || game.status === 'error') && game.lastError) {
+    const failure = document.createElement('div');
+    failure.className = 'werewolf-thinking';
+    failure.style.color = 'var(--danger)';
+    failure.textContent = game.phase === 'first_night' || game.phase === 'other_night'
+      ? privateGameErrorSummary(game.lastError)
+      : game.lastError;
+    dashboard.append(failure);
   }
   if (game.pendingHumanAction) renderClocktowerHumanActionPanel(game, game.pendingHumanAction, dashboard);
   messagesEl.append(dashboard);
@@ -1033,6 +1070,36 @@ function renderSequentialControls(): void {
   }
 }
 
+interface GameLaunch {
+  mode: 'werewolf' | 'clocktower';
+  cancelRequested: boolean;
+  gameId?: string;
+}
+let pendingGameLaunch: GameLaunch | undefined;
+
+function gameLaunchButton(mode: GameLaunch['mode'], button: HTMLButtonElement, status: HTMLElement): boolean {
+  if (pendingGameLaunch?.mode !== mode) {
+    button.disabled = false;
+    return false;
+  }
+  button.textContent = pendingGameLaunch.cancelRequested ? '正在中断…' : '中断';
+  button.classList.add('danger');
+  button.disabled = pendingGameLaunch.cancelRequested;
+  status.textContent = pendingGameLaunch.cancelRequested ? '正在安全停止开局…' : '正在初始化 AI 网页…';
+  return true;
+}
+
+function privateGameErrorSummary(error?: string): string {
+  if (error?.includes('网页发送未确认')) return '网页未确认发送，等待 180 秒仍无回复。已安全暂停，没有重复发送消息。';
+  if (error && /动作|格式|协议|无法结算/.test(error)) {
+    return 'AI 已返回文字，但行动格式无法按游戏规则结算；已暂停，请检查模型输出后继续。';
+  }
+  if (error && /未确认|超时|无响应|等待|发送阶段/.test(error)) {
+    return 'AI 网页回复未能完成后台确认；已暂停。网页出现文字不代表扩展已收到最终结果。';
+  }
+  return '后台 AI 操作异常，已暂停本局；请检查模型网页连接状态后继续。';
+}
+
 function renderWerewolfControls(): void {
   const game = activeWerewolfGame();
   const actionButton = el<HTMLButtonElement>('werewolfActionButton');
@@ -1053,6 +1120,7 @@ function renderWerewolfControls(): void {
     : '输入消息…';
   messageInput.rows = 2;
 
+  if (gameLaunchButton('werewolf', actionButton, status)) return;
   if (!game) {
     actionButton.textContent = '开始';
     actionButton.classList.remove('danger');
@@ -1069,14 +1137,25 @@ function renderWerewolfControls(): void {
 }
 
 async function handleWerewolfAction(): Promise<void> {
+  if (pendingGameLaunch?.mode === 'werewolf') {
+    pendingGameLaunch.cancelRequested = true;
+    renderWerewolfControls();
+    return;
+  }
+  if (pendingGameLaunch) return;
   const game = activeWerewolfGame();
+  let launch: GameLaunch | undefined;
   try {
     if (!game) {
       const setup = state.werewolfSetup;
       const needed = setup.playerCount - (setup.includeHuman ? 1 : 0);
       const providers = state.settings.werewolfProviders.filter((provider) => providerById[provider]?.enabled);
       if (providers.length < needed) return showComposerError(`当前 ${setup.playerCount} 人配置至少需要 ${needed} 个已接入 AI 模型`);
+      launch = { mode: 'werewolf', cancelRequested: false };
+      pendingGameLaunch = launch;
+      renderWerewolfControls();
       await refreshProviderAvailability(providers.slice(0, needed), false);
+      if (launch.cancelRequested) return;
       const normalized: WerewolfSetupSettings = {
         ...setup,
         providerIds: providers,
@@ -1084,7 +1163,14 @@ async function handleWerewolfAction(): Promise<void> {
       };
       const response = await runtimeMessage<{ success: true; gameId: string }>({ type: 'CREATE_WEREWOLF_GAME', setup: normalized });
       state.activeWerewolfGameId = response.gameId;
+      launch.gameId = response.gameId;
+      if (launch.cancelRequested) {
+        await runtimeMessage({ type: 'DELETE_WEREWOLF_GAME', gameId: response.gameId });
+        state.activeWerewolfGameId = undefined;
+        return;
+      }
       await runtimeMessage({ type: 'START_WEREWOLF_GAME', gameId: response.gameId });
+      if (launch.cancelRequested) await runtimeMessage({ type: 'INTERRUPT_WEREWOLF_GAME', gameId: response.gameId });
       return;
     }
     if (game.status === 'running' || game.status === 'waiting_human') {
@@ -1101,9 +1187,16 @@ async function handleWerewolfAction(): Promise<void> {
       renderMode();
       return;
     }
+    launch = { mode: 'werewolf', cancelRequested: false, gameId: game.id };
+    pendingGameLaunch = launch;
+    renderWerewolfControls();
     await runtimeMessage({ type: 'START_WEREWOLF_GAME', gameId: game.id });
+    if (launch.cancelRequested) await runtimeMessage({ type: 'INTERRUPT_WEREWOLF_GAME', gameId: game.id });
   } catch (error) {
     showComposerError(error instanceof Error ? error.message : String(error));
+  } finally {
+    if (launch && pendingGameLaunch === launch) pendingGameLaunch = undefined;
+    if (state.activeMode === 'werewolf') renderWerewolfControls();
   }
 }
 
@@ -1131,8 +1224,11 @@ function renderClocktowerControls(): void {
   humanSend.classList.toggle('hidden', !textTurn);
   attachmentTray.classList.add('hidden');
   messageInput.rows = 2;
-  messageInput.placeholder = game?.pendingHumanAction?.kind === 'whisper' ? '输入私聊内容…' : textTurn ? '输入你的发言…' : '输入消息…';
+  messageInput.placeholder = game?.pendingHumanAction?.kind === 'whisper'
+    ? game.pendingHumanAction.metadata?.mode === 'reply' ? '输入仅对双方可见的私聊回复…' : '可选：输入私聊内容（仅对指定玩家可见）…'
+    : textTurn ? '输入公开发言（所有玩家可见）…' : '输入消息…';
 
+  if (gameLaunchButton('clocktower', actionButton, status)) return;
   if (!game) {
     actionButton.textContent = '开始';
     actionButton.classList.remove('danger');
@@ -1149,7 +1245,14 @@ function renderClocktowerControls(): void {
 }
 
 async function handleClocktowerAction(): Promise<void> {
+  if (pendingGameLaunch?.mode === 'clocktower') {
+    pendingGameLaunch.cancelRequested = true;
+    renderClocktowerControls();
+    return;
+  }
+  if (pendingGameLaunch) return;
   const game = activeClocktowerGame();
+  let launch: GameLaunch | undefined;
   try {
     if (!game) {
       const setup = state.clocktowerSetup;
@@ -1157,12 +1260,23 @@ async function handleClocktowerAction(): Promise<void> {
       const providers = state.settings.clocktowerProviders.filter((provider) => providerById[provider]?.enabled);
       if (providers.length < needed) return showComposerError(`当前 ${setup.playerCount} 人配置至少需要 ${needed} 个已接入 AI 模型`);
       const selectedProviders = providers.slice(0, needed);
+      launch = { mode: 'clocktower', cancelRequested: false };
+      pendingGameLaunch = launch;
+      renderClocktowerControls();
       await refreshProviderAvailability(selectedProviders, false);
+      if (launch.cancelRequested) return;
       rejectKnownBrokenProviders(selectedProviders);
       const normalized: ClocktowerSetupSettings = { ...setup, providerIds: selectedProviders };
       const response = await runtimeMessage<{ success: true; gameId: string }>({ type: 'CREATE_CLOCKTOWER_GAME', setup: normalized });
       state.activeClocktowerGameId = response.gameId;
+      launch.gameId = response.gameId;
+      if (launch.cancelRequested) {
+        await runtimeMessage({ type: 'DELETE_CLOCKTOWER_GAME', gameId: response.gameId });
+        state.activeClocktowerGameId = undefined;
+        return;
+      }
       await runtimeMessage({ type: 'START_CLOCKTOWER_GAME', gameId: response.gameId });
+      if (launch.cancelRequested) await runtimeMessage({ type: 'INTERRUPT_CLOCKTOWER_GAME', gameId: response.gameId });
       return;
     }
     if (game.status === 'running' || game.status === 'waiting_human') {
@@ -1170,7 +1284,11 @@ async function handleClocktowerAction(): Promise<void> {
       return;
     }
     if (game.status === 'error' && game.phase === 'setup') {
+      launch = { mode: 'clocktower', cancelRequested: false, gameId: game.id };
+      pendingGameLaunch = launch;
+      renderClocktowerControls();
       await runtimeMessage({ type: 'START_CLOCKTOWER_GAME', gameId: game.id });
+      if (launch.cancelRequested) await runtimeMessage({ type: 'INTERRUPT_CLOCKTOWER_GAME', gameId: game.id });
       return;
     }
     if (game.status === 'paused' || game.status === 'error') {
@@ -1183,9 +1301,16 @@ async function handleClocktowerAction(): Promise<void> {
       renderMode();
       return;
     }
+    launch = { mode: 'clocktower', cancelRequested: false, gameId: game.id };
+    pendingGameLaunch = launch;
+    renderClocktowerControls();
     await runtimeMessage({ type: 'START_CLOCKTOWER_GAME', gameId: game.id });
+    if (launch.cancelRequested) await runtimeMessage({ type: 'INTERRUPT_CLOCKTOWER_GAME', gameId: game.id });
   } catch (error) {
     showComposerError(error instanceof Error ? error.message : String(error));
+  } finally {
+    if (launch && pendingGameLaunch === launch) pendingGameLaunch = undefined;
+    if (state.activeMode === 'clocktower') renderClocktowerControls();
   }
 }
 

@@ -1,4 +1,4 @@
-import { saveResponseBaseline, confirmResponseBaseline, restoreResponseBaseline, noteMonitorActivity, composerTextMatches, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, sleep, visible, waitForDomMutation } from './common';
+import { recoverStableProviderReply, responseMatchesBaseline, saveResponseBaseline, confirmResponseBaseline, restoreResponseBaseline, noteMonitorActivity, composerTextMatches, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, sleep, visible, waitForDomMutation } from './common';
 import type { ComposerPayload } from '../shared/types';
 
 const PROVIDER = 'qwen' as const;
@@ -82,6 +82,21 @@ async function monitorResponse(operationId: string, generation: number, baseline
   if (generation === monitorAbort) emitProviderEvent({ type: 'PROVIDER_ERROR', provider: PROVIDER, operationId, error: '千问监听超时，未确认回复生成结束' });
 }
 
+async function tryFinalize(operationId: string): Promise<boolean> {
+  if (activeOperationId !== operationId
+      || !await responseMatchesBaseline(operationId, PROVIDER, responseCount())) return false;
+  return recoverStableProviderReply({
+    operationId,
+    provider: PROVIDER,
+    readSnapshot: () => ({
+      owned: activeOperationId === operationId,
+      text: readResponse(),
+      generating: !responseLooksComplete() && Boolean(findCancelButton())
+    }),
+    onFinalized: () => { monitorAbort += 1; activeOperationId = null; }
+  });
+}
+
 async function send(payload: ComposerPayload, operationId: string): Promise<void> {
   if (payload.attachments.length) throw new Error('千问网页端附件入口为动态菜单，当前版本暂不支持自动转发附件；请仅发送文字');
   activeOperationId = operationId;
@@ -135,4 +150,4 @@ function ready(): boolean {
   try { return Boolean(findInput()); } catch { return false; }
 }
 
-installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, ready });
+installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, tryFinalize, ready });

@@ -31,7 +31,7 @@ import { mutatePersistedState } from './state-store';
 
 export interface WerewolfProviderBridge {
   createFreshConversation(provider: ProviderId, preferredTabId?: number): Promise<{ tabId: number; conversationUrl?: string }>;
-  send(provider: ProviderId, operationId: string, payload: ComposerPayload, tabId?: number, conversationUrl?: string): Promise<{ tabId: number; conversationUrl?: string }>;
+  send(provider: ProviderId, operationId: string, payload: ComposerPayload, tabId?: number, conversationUrl?: string): Promise<{ tabId: number; conversationUrl?: string; submissionUnconfirmed?: boolean }>;
   cancel(provider: ProviderId, operationId?: string, tabId?: number): Promise<void>;
   closeTab(tabId: number): Promise<void>;
 }
@@ -594,6 +594,7 @@ export function createWerewolfEngine(bridge: WerewolfProviderBridge) {
         const currentPending = findPendingTurn(current, pending.operationId);
         if (!currentPending) return;
         currentPending.phase = 'active';
+        currentPending.submissionUnconfirmedAt = actual.submissionUnconfirmed ? Date.now() : undefined;
         current.bindings[pending.playerId] = { provider: player.providerId!, tabId: actual.tabId, conversationUrl: actual.conversationUrl };
         current.updatedAt = Date.now();
       });
@@ -720,8 +721,21 @@ export function createWerewolfEngine(bridge: WerewolfProviderBridge) {
     if (event.tabId && binding?.tabId && event.tabId !== binding.tabId) return true;
 
     if (event.type === 'PROVIDER_RESPONSE_STARTED' || event.type === 'PROVIDER_RESPONSE_DELTA') {
-      // Game mode is intentionally final-only. Intermediate text, including
-      // reasoning/thinking DOM, is never written to the GameEvent ledger.
+      // Persist only an activity timestamp, not private reasoning or game text.
+      // A sleeping service worker must not forget that this AI is progressing.
+      const now = Date.now();
+      if ((event.type === 'PROVIDER_RESPONSE_STARTED' || Boolean(event.text?.trim()))
+          && (!pending.responseStartedAt || now - (pending.responseLastActivityAt ?? 0) >= 15000)) {
+        const updated = await mutatePersistedState((next) => {
+          const current = findPendingTurn(gameById(next, game.id), pending.operationId);
+          if (!current) return false;
+          const first = !current.responseStartedAt;
+          current.responseStartedAt ??= now;
+          current.responseLastActivityAt = now;
+          return first;
+        });
+        if (updated) notifyGameChanged(game.id);
+      }
       return true;
     }
     if (event.type === 'PROVIDER_ERROR') {

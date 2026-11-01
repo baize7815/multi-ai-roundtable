@@ -54,11 +54,27 @@ engine = createClocktowerEngine({
   send: async (provider, operationId, payload, tabId, conversationUrl) => {
     const actualTab = tabId ?? ++tabSequence;
     queueMicrotask(async () => {
+      const snapshot = await loadState();
+      const game = snapshot.clocktowerGames.find((item) => item.pendingTurn?.operationId === operationId);
+      const turn = game?.pendingTurn;
+      let text = actionReply(payload.text);
+      if (turn?.expectedActions.includes('nominate')) {
+        // This is a deterministic game-engine lifecycle test, not a model
+        // strategy test. One legally nominated Demon is enough to exercise
+        // voting, execution and the win condition. Repeatedly nominating many
+        // targets with unanimous yes votes creates indefinite ties.
+        const alreadyNominated = game?.nominations.some((item) => item.day === game.day);
+        const demon = game?.players.find((player) => player.alive && player.trueCharacter === 'imp');
+        const target = demon && turn.allowedTargets.includes(demon.seat)
+          ? demon.seat : turn.allowedTargets[0];
+        text = alreadyNominated || target === undefined ? '[[ACTION:PASS]]'
+          : `[[ACTION:NOMINATE:${target}]]`;
+      }
       await engine.handleProviderEvent({
         type: 'PROVIDER_RESPONSE_COMPLETED',
         provider,
         operationId,
-        text: actionReply(payload.text)
+        text
       });
     });
     return { tabId: actualTab, conversationUrl: conversationUrl ?? `https://test.invalid/${provider}/${actualTab}` };
@@ -69,14 +85,22 @@ engine = createClocktowerEngine({
 
 async function waitForTerminal(gameId: string, timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
+  let last: Record<string, unknown> = {};
   while (Date.now() < deadline) {
     const state = await loadState();
     const game = state.clocktowerGames.find((item) => item.id === gameId);
     if (!game) throw new Error('game disappeared');
     if (game.status === 'ended' || game.status === 'paused' || game.status === 'error') return game;
+    last = {
+      status: game.status, phase: game.phase, day: game.day,
+      pending: game.pendingTurn?.operationId,
+      actor: game.pendingTurn?.seat,
+      cursor: game.cursor, events: game.events.length,
+      lastError: game.lastError
+    };
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  throw new Error('clocktower engine simulation timed out');
+  throw new Error('clocktower engine simulation timed out: ' + JSON.stringify(last));
 }
 
 for (const playerCount of [6, 7, 8] as const) {
@@ -158,6 +182,11 @@ assert.equal(resumableState.status, 'running');
 assert.ok(resumableState.pendingTurn, '应存在等待 Provider 回复的行动');
 const firstPending = structuredClone(resumableState.pendingTurn!);
 const firstDispatch = heldDispatches.at(-1)!;
+const eventCountBeforeStream = resumableState.events.length;
+await holdEngine.handleProviderEvent({ type: 'PROVIDER_RESPONSE_STARTED', provider: firstPending.provider, operationId: firstPending.operationId });
+resumableState = (await loadState()).clocktowerGames.find((item) => item.id === resumable.id)!;
+assert.ok(resumableState.pendingTurn?.responseStartedAt, '迷雾议会应标记已开始收到 AI 回复');
+assert.equal(resumableState.events.length, eventCountBeforeStream, '中间回复内容不能泄露私密信息');
 
 {
   const persisted = await loadState();

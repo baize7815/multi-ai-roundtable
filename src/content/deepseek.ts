@@ -1,4 +1,4 @@
-import { saveResponseBaseline, confirmResponseBaseline, restoreResponseBaseline, noteMonitorActivity, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, setFileInputFiles, setTextareaText, sleep, visible, waitForDomMutation } from './common';
+import { recoverStableProviderReply, responseMatchesBaseline, saveResponseBaseline, confirmResponseBaseline, restoreResponseBaseline, noteMonitorActivity, confirmProviderSubmission, elementToMarkdown, emitProviderEvent, installProviderHarness, PROVIDER_MONITOR_MAX_MS, responseCompletionReady, setFileInputFiles, setTextareaText, sleep, visible, waitForDomMutation } from './common';
 import type { ComposerPayload } from '../shared/types';
 
 const PROVIDER = 'deepseek' as const;
@@ -68,7 +68,7 @@ function responseCount(): number {
 function responseLooksComplete(): boolean {
   const latest = latestFinalResponse();
   const row = latest?.closest('[data-virtual-list-item-key]');
-  return Boolean(row?.querySelector('[role="button"][aria-label="Read aloud"], [role="button"][aria-disabled="false"]'));
+  return Boolean(row?.querySelector('[aria-label="Read aloud"], [title="Read aloud"], [aria-label="朗读"], [title="朗读"]'));
 }
 
 async function monitorResponse(operationId: string, generation: number, baselineCount: number): Promise<void> {
@@ -95,7 +95,8 @@ async function monitorResponse(operationId: string, generation: number, baseline
       lastChangeAt = Date.now();
       emitProviderEvent({ type: 'PROVIDER_RESPONSE_DELTA', provider: PROVIDER, operationId, text });
     } else if (started && text === last) {
-      if (responseCompletionReady({ lastChangeAt, explicitComplete: responseLooksComplete(), generationActive: Boolean(findCancelButton()) })) {
+      const explicitComplete = responseLooksComplete();
+      if (responseCompletionReady({ lastChangeAt, explicitComplete, generationActive: !explicitComplete && Boolean(findCancelButton()) })) {
         emitProviderEvent({ type: 'PROVIDER_RESPONSE_COMPLETED', provider: PROVIDER, operationId, text: last });
         if (activeOperationId === operationId) activeOperationId = null;
         return;
@@ -104,6 +105,21 @@ async function monitorResponse(operationId: string, generation: number, baseline
     await waitForDomMutation();
   }
   if (generation === monitorAbort) emitProviderEvent({ type: 'PROVIDER_ERROR', provider: PROVIDER, operationId, error: 'DeepSeek 监听超时，未确认回复生成结束' });
+}
+
+
+async function tryFinalize(operationId: string): Promise<boolean> {
+  if (activeOperationId !== operationId
+    || !await responseMatchesBaseline(operationId, PROVIDER, responseCount())) return false;
+  return recoverStableProviderReply({
+    operationId, provider: PROVIDER,
+    readSnapshot: () => ({
+      owned: activeOperationId === operationId,
+      text: readResponse(),
+      generating: !responseLooksComplete() && Boolean(findCancelButton())
+    }),
+    onFinalized: () => { monitorAbort += 1; activeOperationId = null; }
+  });
 }
 
 async function send(payload: ComposerPayload, operationId: string): Promise<void> {
@@ -173,4 +189,4 @@ function ready(): boolean {
   try { return Boolean(findInput()); } catch { return false; }
 }
 
-installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, ready });
+installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, tryFinalize, ready });

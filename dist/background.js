@@ -1111,13 +1111,38 @@ function preparePrivateGamePage(tabId, provider, activate = true) {
     await chrome.tabs.update(tabId, { autoDiscardable: false, ...activate || tab.frozen ? { active: true } : {} });
   });
 }
+function pulsePrivateGamePage(tabId, provider, durationMs = 900) {
+  return serial(async () => {
+    if (!await isPrivateGameTab(tabId, provider)) return false;
+    const target = await ownedWindow();
+    if (!target?.id) return false;
+    const focused = (await chrome.windows.getAll({ windowTypes: ["normal"] })).find((window2) => window2.focused);
+    if (focused?.id === target.id) return true;
+    if (focused?.id === void 0) return false;
+    const tab = await chrome.tabs.get(tabId).catch(() => void 0);
+    if (!tab || tab.windowId !== target.id) return false;
+    try {
+      await wakeWindow(target.id);
+      await chrome.tabs.update(tabId, { active: true, autoDiscardable: false });
+      await chrome.windows.update(target.id, { focused: true });
+      await new Promise((resolve) => setTimeout(resolve, durationMs));
+      return true;
+    } finally {
+      const current = (await chrome.windows.getAll({ windowTypes: ["normal"] }).catch(() => [])).find((window2) => window2.focused);
+      if (current?.id === target.id) {
+        await chrome.windows.update(focused.id, { focused: true }).catch(() => void 0);
+      }
+    }
+  });
+}
 function releaseInactivePrivateGamePages(keep) {
   return serial(async () => {
     const target = await ownedWindow();
     const currentRecord = await record();
     if (!target?.id || !currentRecord) return;
     const ownedTabs = await chrome.tabs.query({ windowId: target.id });
-    const keepTab = [...keep].find((tabId) => ownedTabs.some((tab) => tab.id === tabId));
+    const activeOwned = ownedTabs.find((tab) => tab.active && tab.id !== void 0 && keep.has(tab.id));
+    const keepTab = activeOwned?.id ?? [...keep].find((tabId) => ownedTabs.some((tab) => tab.id === tabId));
     if (keepTab !== void 0) {
       await wakeWindow(target.id);
       await chrome.tabs.update(keepTab, { active: true, autoDiscardable: false }).catch(() => void 0);
@@ -2017,6 +2042,7 @@ function createWerewolfEngine(bridge) {
         const currentPending = findPendingTurn(current, pending.operationId);
         if (!currentPending) return;
         currentPending.phase = "active";
+        currentPending.submissionUnconfirmedAt = actual.submissionUnconfirmed ? Date.now() : void 0;
         current.bindings[pending.playerId] = { provider: player.providerId, tabId: actual.tabId, conversationUrl: actual.conversationUrl };
         current.updatedAt = Date.now();
       });
@@ -2141,6 +2167,18 @@ function createWerewolfEngine(bridge) {
     const binding = game.bindings[pending.playerId];
     if (event.tabId && binding?.tabId && event.tabId !== binding.tabId) return true;
     if (event.type === "PROVIDER_RESPONSE_STARTED" || event.type === "PROVIDER_RESPONSE_DELTA") {
+      const now = Date.now();
+      if ((event.type === "PROVIDER_RESPONSE_STARTED" || Boolean(event.text?.trim())) && (!pending.responseStartedAt || now - (pending.responseLastActivityAt ?? 0) >= 15e3)) {
+        const updated = await mutatePersistedState((next) => {
+          const current = findPendingTurn(gameById(next, game.id), pending.operationId);
+          if (!current) return false;
+          const first = !current.responseStartedAt;
+          current.responseStartedAt ??= now;
+          current.responseLastActivityAt = now;
+          return first;
+        });
+        if (updated) notifyGameChanged(game.id);
+      }
       return true;
     }
     if (event.type === "PROVIDER_ERROR") {
@@ -3581,6 +3619,7 @@ function createClocktowerEngine(bridge) {
         const current = gameById2(next, gameId);
         if (current.pendingTurn?.operationId !== pending.operationId) return;
         current.pendingTurn.phase = "active";
+        current.pendingTurn.submissionUnconfirmedAt = actual.submissionUnconfirmed ? Date.now() : void 0;
         current.bindings[pending.playerId] = { provider: pending.provider, tabId: actual.tabId, conversationUrl: actual.conversationUrl };
         current.updatedAt = Date.now();
       });
@@ -3616,7 +3655,10 @@ function createClocktowerEngine(bridge) {
   }
   function scheduleAdvance(gameId) {
     const tail2 = advanceTails2.get(gameId) ?? Promise.resolve();
-    const next = tail2.catch(() => void 0).then(() => advance(gameId));
+    const next = tail2.catch(() => void 0).then(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return advance(gameId);
+    });
     advanceTails2.set(gameId, next);
     const clear = () => {
       if (advanceTails2.get(gameId) === next) advanceTails2.delete(gameId);
@@ -3855,6 +3897,22 @@ function createClocktowerEngine(bridge) {
     const game = state.clocktowerGames.find((item) => item.pendingTurn?.operationId === event.operationId);
     const pending = game?.pendingTurn;
     if (!game || !pending || pending.provider !== event.provider) return false;
+    if (event.tabId && game.bindings[pending.playerId]?.tabId && game.bindings[pending.playerId]?.tabId !== event.tabId) return true;
+    if (event.type === "PROVIDER_RESPONSE_STARTED" || event.type === "PROVIDER_RESPONSE_DELTA") {
+      const now = Date.now();
+      if ((event.type === "PROVIDER_RESPONSE_STARTED" || Boolean(event.text?.trim())) && (!pending.responseStartedAt || now - (pending.responseLastActivityAt ?? 0) >= 15e3)) {
+        const updated = await mutatePersistedState((next) => {
+          const current = gameById2(next, game.id).pendingTurn;
+          if (!current || current.operationId !== pending.operationId) return false;
+          const first = !current.responseStartedAt;
+          current.responseStartedAt ??= now;
+          current.responseLastActivityAt = now;
+          return first;
+        });
+        if (updated) notify(game.id);
+      }
+      return true;
+    }
     if (event.type === "PROVIDER_RESPONSE_COMPLETED") {
       const result = await completeTurn(game.id, pending, event.text ?? "");
       notify(game.id);
@@ -3965,6 +4023,63 @@ function createClocktowerEngine(bridge) {
   };
 }
 
+// src/background/provider-events.ts
+var TERMINAL_RECEIPT_PREFIX = "multiAiRoundtableTerminalReceipt:";
+function isTerminalProviderEvent(event) {
+  return event.type === "PROVIDER_RESPONSE_COMPLETED" || event.type === "PROVIDER_ERROR";
+}
+function isProviderReplyActivity(event) {
+  return event.type === "PROVIDER_RESPONSE_STARTED" || event.type === "PROVIDER_RESPONSE_DELTA";
+}
+function matchesBinding(event, provider, tabId) {
+  return event.provider === provider && (event.tabId === void 0 || tabId === void 0 || event.tabId === tabId);
+}
+function pendingOwner(state, event) {
+  const operationId = event.operationId;
+  if (!operationId) return void 0;
+  for (const session of state.conversations) {
+    const op = session.pendingOperations?.[operationId];
+    if (op && matchesBinding(event, op.provider, session.bindings[op.provider]?.tabId)) return "conversation";
+  }
+  for (const game of state.werewolfGames) {
+    const turns = [game.pendingTurn, ...game.pendingParallelTurns ?? []];
+    const op = turns.find((item) => item?.operationId === operationId);
+    if (op && matchesBinding(event, op.provider, game.bindings[op.playerId]?.tabId)) return "werewolf";
+  }
+  for (const game of state.clocktowerGames) {
+    const op = game.pendingTurn;
+    if (op?.operationId === operationId && matchesBinding(event, op.provider, game.bindings[op.playerId]?.tabId)) return "clocktower";
+  }
+  return void 0;
+}
+async function acceptTerminalProviderEvent(event, deps) {
+  if (!isTerminalProviderEvent(event) || !event.operationId) return false;
+  const key = TERMINAL_RECEIPT_PREFIX + event.operationId;
+  const receipt = await deps.readReceipt(key);
+  if (receipt?.provider === event.provider && receipt.type === event.type) return true;
+  const owner = pendingOwner(await deps.loadState(), event);
+  if (!owner) return false;
+  if (!await deps.dispatch(owner, event)) return false;
+  await deps.writeReceipt(key, { provider: event.provider, type: event.type, completedAt: Date.now() });
+  return true;
+}
+
+// src/background/game-reply-timing.ts
+var GAME_PREPARING_TIMEOUT_MS = 18e4;
+var GAME_UNCONFIRMED_TIMEOUT_MS = 18e4;
+var GAME_REPLY_IDLE_TIMEOUT_MS = 36e4;
+function gameReplyTiming(pending, volatileActivityAt = 0, now = Date.now()) {
+  const lastActivityAt = Math.max(
+    pending.startedAt,
+    pending.responseStartedAt ?? 0,
+    pending.responseLastActivityAt ?? 0,
+    volatileActivityAt
+  );
+  const unconfirmedWithoutReply = Boolean(pending.submissionUnconfirmedAt && !pending.responseStartedAt);
+  const timeoutMs = unconfirmedWithoutReply ? GAME_UNCONFIRMED_TIMEOUT_MS : GAME_REPLY_IDLE_TIMEOUT_MS;
+  return { lastActivityAt, timeoutMs, unconfirmedWithoutReply, timedOut: now - lastActivityAt >= timeoutMs };
+}
+
 // src/background.ts
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
 var providerContentScripts = {
@@ -3988,6 +4103,8 @@ var ISOLATION_MIGRATION_KEY = "multiAiRoundtableIsolationMigrationV1";
 var PROVIDER_WATCHDOG_ALARM = "multi-ai-provider-watchdog";
 var lastProviderActivity = /* @__PURE__ */ new Map();
 var sendingOperations = /* @__PURE__ */ new Set();
+var lastPrivateFocusPulseAt = 0;
+var PRIVATE_FOCUS_PULSE_COOLDOWN_MS = 25e3;
 var wakeQueue = Promise.resolve();
 var watchdogRunning = false;
 var commandInFlight = /* @__PURE__ */ new Set();
@@ -4442,6 +4559,10 @@ async function wakeOperation(operationId, requestedTabId, onReady) {
     const tabId = operation ? session?.bindings[operation.provider]?.tabId : gameOperation ? game?.bindings[gameOperation.playerId]?.tabId : clockOperation ? clockGame?.bindings[clockOperation.playerId]?.tabId : void 0;
     if (!provider || !tabId || requestedTabId !== void 0 && requestedTabId !== tabId || !await isManagedTab(tabId, provider)) throw new Error("\u672C\u6B21 AI \u64CD\u4F5C\u5DF2\u7ED3\u675F\u6216\u6807\u7B7E\u7ED1\u5B9A\u5931\u6548");
     if (gameOperation || clockOperation) {
+      await preparePrivateGamePage(tabId, provider, true);
+      await startPageFramePump(tabId, provider);
+      lastPrivateFocusPulseAt = Date.now();
+      await pulsePrivateGamePage(tabId, provider).catch(() => void 0);
       onReady?.();
       return;
     }
@@ -4550,6 +4671,35 @@ async function syncProviderWatchdogNow() {
     lastProviderActivity.clear();
   }
 }
+async function gameTerminalRecovering(operationId, provider, tabId) {
+  if (tabId) {
+    try {
+      const checked = await sendProviderMessage(tabId, provider, {
+        type: "PROVIDER_CHECK",
+        operationId,
+        tryFinalize: true
+      }, 1e4);
+      if (checked?.success && checked.phase === "terminal") return true;
+    } catch {
+    }
+  }
+  await replayPendingTerminalEvents();
+  const latest = await loadState();
+  const stillPending = latest.werewolfGames.some((game) => gamePendingTurns(game).some((turn) => turn.operationId === operationId)) || latest.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((turn) => turn.operationId === operationId));
+  if (!stillPending) return true;
+  const key = `multiAiRoundtableTerminal:${operationId}`;
+  const journal = (await chrome.storage.local.get(key))[key];
+  if (journal?.operationId !== operationId || journal.provider !== provider) return false;
+  return routeProviderEvent({ ...journal, tabId }).catch(() => false);
+}
+async function pulseStalledPrivateReply(operationId, tabId, provider, lastActivityAt) {
+  if (Date.now() - lastActivityAt < 12e3 || Date.now() - lastPrivateFocusPulseAt < PRIVATE_FOCUS_PULSE_COOLDOWN_MS) return;
+  const state = await loadState();
+  const bound = state.werewolfGames.some((game) => gamePendingTurns(game).some((turn) => turn.operationId === operationId && turn.provider === provider && game.bindings[turn.playerId]?.tabId === tabId)) || state.clocktowerGames.some((game) => clocktowerPendingTurns(game).some((turn) => turn.operationId === operationId && turn.provider === provider && game.bindings[turn.playerId]?.tabId === tabId));
+  if (!bound) return;
+  lastPrivateFocusPulseAt = Date.now();
+  await pulsePrivateGamePage(tabId, provider).catch(() => void 0);
+}
 async function checkPendingProviders() {
   if (watchdogRunning) return;
   watchdogRunning = true;
@@ -4570,7 +4720,6 @@ async function checkPendingProviders() {
           const response = await sendProviderMessage(tabId, operation.provider, { type: "PROVIDER_CHECK", operationId: operation.operationId }, 5e3);
           if (response?.success !== true) throw new Error("\u76D1\u542C\u672A\u6062\u590D");
           if (response.phase === "terminal") continue;
-          if (response.resumed) lastProviderActivity.set(operation.operationId, Date.now());
           const lastActivity = lastProviderActivity.get(operation.operationId) ?? operation.startedAt;
           if (Date.now() - lastActivity >= 25e3) await wakeOperation(operation.operationId);
         } catch {
@@ -4581,29 +4730,47 @@ async function checkPendingProviders() {
     for (const game of state.werewolfGames) {
       for (const operation of gamePendingTurns(game)) {
         const tabId = game.bindings[operation.playerId]?.tabId;
-        if (!tabId || operation.phase === "preparing") continue;
+        if (operation.phase === "preparing") {
+          if (!sendingOperations.has(operation.operationId) && Date.now() - operation.startedAt >= GAME_PREPARING_TIMEOUT_MS && !await gameTerminalRecovering(operation.operationId, operation.provider, tabId)) {
+            await werewolfEngine.handleProviderEvent({
+              type: "PROVIDER_ERROR",
+              provider: operation.provider,
+              operationId: operation.operationId,
+              error: "\u51C6\u5907\u53D1\u9001\u9636\u6BB5\u8D85\u8FC7 180 \u79D2\uFF0C\u5C1A\u672A\u786E\u8BA4\u63D0\u4EA4\uFF0C\u5DF2\u5B89\u5168\u6682\u505C\u672C\u5C40\uFF1B\u4E0D\u4F1A\u81EA\u52A8\u91CD\u590D\u53D1\u9001\u3002"
+            });
+          }
+          continue;
+        }
+        if (!tabId) continue;
         try {
           if (!await isManagedTab(tabId, operation.provider)) {
             await werewolfEngine.handleProviderEvent({ type: "PROVIDER_ERROR", provider: operation.provider, operationId: operation.operationId, error: "\u6E38\u620F\u7F51\u9875\u7ED1\u5B9A\u5931\u6548\uFF0C\u5DF2\u6682\u505C\u672C\u5C40\uFF0C\u907F\u514D\u64CD\u4F5C\u65E0\u5173\u7F51\u9875\u6216\u91CD\u590D\u53D1\u9001\u3002" });
             continue;
           }
-          await preparePrivateGamePage(tabId, operation.provider);
+          await preparePrivateGamePage(tabId, operation.provider, false);
           await startPageFramePump(tabId, operation.provider);
           if (sendingOperations.has(operation.operationId)) continue;
-          const response = await sendProviderMessage(tabId, operation.provider, { type: "PROVIDER_CHECK", operationId: operation.operationId }, 5e3);
+          const lastActivity = gameReplyTiming(operation, lastProviderActivity.get(operation.operationId)).lastActivityAt;
+          const probeFinal = Date.now() - lastActivity >= 12e3;
+          if (probeFinal) await pulseStalledPrivateReply(operation.operationId, tabId, operation.provider, lastActivity);
+          const response = await sendProviderMessage(
+            tabId,
+            operation.provider,
+            { type: "PROVIDER_CHECK", operationId: operation.operationId, tryFinalize: probeFinal },
+            probeFinal ? 1e4 : 5e3
+          );
           if (response?.success !== true) throw new Error("\u76D1\u542C\u672A\u6062\u590D");
           if (response.phase === "terminal") continue;
-          if (response.resumed) lastProviderActivity.set(operation.operationId, Date.now());
         } catch {
           await resumePendingOperationsForTab(tabId).catch(() => void 0);
         }
-        const lastActivity = lastProviderActivity.get(operation.operationId) ?? operation.startedAt;
-        if (Date.now() - lastActivity >= 3 * 60 * 1e3) {
+        const timing = gameReplyTiming(operation, lastProviderActivity.get(operation.operationId));
+        if (timing.timedOut && !await gameTerminalRecovering(operation.operationId, operation.provider, tabId)) {
           await werewolfEngine.handleProviderEvent({
             type: "PROVIDER_ERROR",
             provider: operation.provider,
             operationId: operation.operationId,
-            error: "\u540E\u53F0 AI \u9875\u9762\u957F\u65F6\u95F4\u65E0\u54CD\u5E94\uFF0C\u5DF2\u6682\u505C\u672C\u5C40\u3002\u4E3A\u907F\u514D\u6CC4\u9732\u8EAB\u4EFD\uFF0C\u72FC\u4EBA\u6740\u4E0D\u4F1A\u81EA\u52A8\u5207\u6362\u5230\u5BF9\u5E94\u7F51\u9875\u3002"
+            error: timing.unconfirmedWithoutReply ? "\u7F51\u9875\u53D1\u9001\u672A\u786E\u8BA4\u4E14 180 \u79D2\u5185\u65E0\u56DE\u590D\uFF0C\u672A\u91CD\u590D\u53D1\u9001\uFF1B\u5DF2\u6682\u505C\u672C\u5C40\u3002" : "\u540E\u53F0 AI \u9875\u9762\u957F\u65F6\u95F4\u65E0\u54CD\u5E94\uFF0C\u5DF2\u6682\u505C\u672C\u5C40\u3002\u4E3A\u907F\u514D\u6CC4\u9732\u8EAB\u4EFD\uFF0C\u72FC\u4EBA\u6740\u4E0D\u4F1A\u81EA\u52A8\u5207\u6362\u5230\u5BF9\u5E94\u7F51\u9875\u3002"
           });
         }
       }
@@ -4611,38 +4778,47 @@ async function checkPendingProviders() {
     for (const game of state.clocktowerGames) {
       for (const operation of clocktowerPendingTurns(game)) {
         const tabId = game.bindings[operation.playerId]?.tabId;
+        if (operation.phase === "preparing") {
+          if (!sendingOperations.has(operation.operationId) && Date.now() - operation.startedAt >= GAME_PREPARING_TIMEOUT_MS && !await gameTerminalRecovering(operation.operationId, operation.provider, tabId)) {
+            await clocktowerEngine.handleProviderEvent({
+              type: "PROVIDER_ERROR",
+              provider: operation.provider,
+              operationId: operation.operationId,
+              error: "\u51C6\u5907\u53D1\u9001\u9636\u6BB5\u8D85\u8FC7 180 \u79D2\uFF0C\u5C1A\u672A\u786E\u8BA4\u63D0\u4EA4\uFF0C\u5DF2\u5B89\u5168\u6682\u505C\u672C\u5C40\uFF1B\u4E0D\u4F1A\u81EA\u52A8\u91CD\u590D\u53D1\u9001\u3002"
+            });
+          }
+          continue;
+        }
         if (!tabId) continue;
         try {
           if (!await isManagedTab(tabId, operation.provider)) {
             await clocktowerEngine.handleProviderEvent({ type: "PROVIDER_ERROR", provider: operation.provider, operationId: operation.operationId, error: "\u6E38\u620F\u7F51\u9875\u7ED1\u5B9A\u5931\u6548\uFF0C\u5DF2\u6682\u505C\u672C\u5C40\uFF0C\u907F\u514D\u64CD\u4F5C\u65E0\u5173\u7F51\u9875\u6216\u91CD\u590D\u53D1\u9001\u3002" });
             continue;
           }
-          await preparePrivateGamePage(tabId, operation.provider);
+          await preparePrivateGamePage(tabId, operation.provider, false);
           await startPageFramePump(tabId, operation.provider);
           if (sendingOperations.has(operation.operationId)) continue;
-          const response = await sendProviderMessage(tabId, operation.provider, { type: "PROVIDER_CHECK", operationId: operation.operationId }, 5e3);
+          const lastActivity = gameReplyTiming(operation, lastProviderActivity.get(operation.operationId)).lastActivityAt;
+          const probeFinal = Date.now() - lastActivity >= 12e3;
+          if (probeFinal) await pulseStalledPrivateReply(operation.operationId, tabId, operation.provider, lastActivity);
+          const response = await sendProviderMessage(
+            tabId,
+            operation.provider,
+            { type: "PROVIDER_CHECK", operationId: operation.operationId, tryFinalize: probeFinal },
+            probeFinal ? 1e4 : 5e3
+          );
           if (response?.success !== true) throw new Error("\u76D1\u542C\u672A\u6062\u590D");
           if (response.phase === "terminal") continue;
-          if (response.resumed) lastProviderActivity.set(operation.operationId, Date.now());
         } catch {
-          if (operation.phase === "preparing") {
-            await clocktowerEngine.handleProviderEvent({
-              type: "PROVIDER_ERROR",
-              provider: operation.provider,
-              operationId: operation.operationId,
-              error: "\u6062\u590D\u65F6\u65E0\u6CD5\u786E\u8BA4\u8FD9\u6B21\u8FF7\u96FE\u8BAE\u4F1A\u64CD\u4F5C\u662F\u5426\u5DF2\u7ECF\u63D0\u4EA4\uFF1B\u4E3A\u907F\u514D\u91CD\u590D\u53D1\u9001\uFF0C\u5DF2\u6682\u505C\u672C\u5C40\u3002"
-            });
-            continue;
-          }
           await resumePendingOperationsForTab(tabId).catch(() => void 0);
         }
-        const lastActivity = lastProviderActivity.get(operation.operationId) ?? operation.startedAt;
-        if (Date.now() - lastActivity >= 3 * 60 * 1e3) {
+        const timing = gameReplyTiming(operation, lastProviderActivity.get(operation.operationId));
+        if (timing.timedOut && !await gameTerminalRecovering(operation.operationId, operation.provider, tabId)) {
           await clocktowerEngine.handleProviderEvent({
             type: "PROVIDER_ERROR",
             provider: operation.provider,
             operationId: operation.operationId,
-            error: "\u540E\u53F0 AI \u9875\u9762\u957F\u65F6\u95F4\u65E0\u54CD\u5E94\uFF0C\u5DF2\u6682\u505C\u672C\u5C40\u3002\u4E3A\u907F\u514D\u6CC4\u9732\u79C1\u5BC6\u4FE1\u606F\uFF0C\u8FF7\u96FE\u8BAE\u4F1A\u4E0D\u4F1A\u81EA\u52A8\u5207\u6362\u5230\u5BF9\u5E94\u7F51\u9875\u3002"
+            error: timing.unconfirmedWithoutReply ? "\u7F51\u9875\u53D1\u9001\u672A\u786E\u8BA4\u4E14 180 \u79D2\u5185\u65E0\u56DE\u590D\uFF0C\u672A\u91CD\u590D\u53D1\u9001\uFF1B\u5DF2\u6682\u505C\u672C\u5C40\u3002" : "\u540E\u53F0 AI \u9875\u9762\u957F\u65F6\u95F4\u65E0\u54CD\u5E94\uFF0C\u5DF2\u6682\u505C\u672C\u5C40\u3002\u4E3A\u907F\u514D\u6CC4\u9732\u79C1\u5BC6\u4FE1\u606F\uFF0C\u8FF7\u96FE\u8BAE\u4F1A\u4E0D\u4F1A\u81EA\u52A8\u5207\u6362\u5230\u5BF9\u5E94\u7F51\u9875\u3002"
           });
         }
       }
@@ -4659,6 +4835,7 @@ async function waitForProviderReady(tabId, provider, timeoutMs = 3e4, initialise
   allowForegroundWake = allowForegroundWake && !replyAccelerationEnabled;
   await startPageFramePump(tabId, provider).catch(() => void 0);
   const deadline = Date.now() + timeoutMs;
+  let privateReadySince = 0;
   const wakeAt = Date.now() + Math.min(6e3, Math.max(2e3, Math.floor(timeoutMs / 3)));
   let lastError;
   let restoreWake;
@@ -4682,9 +4859,12 @@ async function waitForProviderReady(tabId, provider, timeoutMs = 3e4, initialise
           throw new Error("\u6B63\u5728\u66F4\u65B0 AI \u7F51\u9875\u63A7\u5236\u811A\u672C");
         }
         if (response?.success === true && tab.status === "complete") {
-          await startPageFramePump(tabId, provider).catch(() => void 0);
-          return;
-        }
+          if (!privatePage || privateReadySince && Date.now() - privateReadySince >= 1200) {
+            await startPageFramePump(tabId, provider).catch(() => void 0);
+            return;
+          }
+          if (!privateReadySince) privateReadySince = Date.now();
+        } else privateReadySince = 0;
       } catch (error) {
         lastError = error;
       }
@@ -4716,7 +4896,8 @@ async function sendProviderOperation(provider, operationId, payload, preferredTa
       response = await sendProviderMessage(tab.id, provider, {
         type: "PROVIDER_SEND",
         operationId,
-        payload
+        payload,
+        privateGame: !allowForegroundWake
       }, allowForegroundWake ? void 0 : 9e4);
     } catch (error) {
       if (!isNavigationChannelClosed(error)) throw error;
@@ -4728,7 +4909,7 @@ async function sendProviderOperation(provider, operationId, payload, preferredTa
     }
     if (response?.success !== true) throw new Error(response?.error || `${provider} \u9875\u9762\u672A\u786E\u8BA4\u53D1\u9001`);
     const refreshed = await chrome.tabs.get(tab.id).catch(() => tab);
-    return { tabId: tab.id, conversationUrl: refreshed.url ?? tab.url };
+    return { tabId: tab.id, conversationUrl: refreshed.url ?? tab.url, submissionUnconfirmed: response.phase === "unconfirmed" };
   } finally {
     sendingOperations.delete(operationId);
   }
@@ -4792,6 +4973,21 @@ var clocktowerEngine = createClocktowerEngine({
   }
 });
 async function routeProviderEvent(event) {
+  if (isTerminalProviderEvent(event)) {
+    return acceptTerminalProviderEvent(event, {
+      loadState,
+      readReceipt: async (key) => (await chrome.storage.local.get(key))[key],
+      writeReceipt: async (key, value) => {
+        await chrome.storage.local.set({ [key]: value });
+      },
+      dispatch: async (owner, terminal) => {
+        if (owner === "werewolf") return werewolfEngine.handleProviderEvent(terminal);
+        if (owner === "clocktower") return clocktowerEngine.handleProviderEvent(terminal);
+        await orchestrator.handleProviderEvent(terminal);
+        return true;
+      }
+    });
+  }
   const handled = await werewolfEngine.handleProviderEvent(event) || await clocktowerEngine.handleProviderEvent(event);
   if (!handled) {
     await orchestrator.handleProviderEvent(event);
@@ -4799,6 +4995,7 @@ async function routeProviderEvent(event) {
       await foregroundReplies.sync(await loadState(), event.tabId).catch(() => void 0);
     }
   }
+  return true;
 }
 async function replayPendingTerminalEvents(state) {
   state ??= await loadState();
@@ -4826,9 +5023,15 @@ async function replayPendingTerminalEvents(state) {
     const key = `${prefix}${owner.operationId}`;
     const event = saved[key];
     if (!event || event.operationId !== owner.operationId || event.provider !== owner.provider || event.type !== "PROVIDER_RESPONSE_COMPLETED" && event.type !== "PROVIDER_ERROR") continue;
-    await routeProviderEvent({ ...event, tabId: owner.tabId });
-    await chrome.storage.local.remove([key, `multiAiRoundtableResponseBaseline:${owner.operationId}`]);
+    if (await routeProviderEvent({ ...event, tabId: owner.tabId })) {
+      await chrome.storage.local.remove([key, `multiAiRoundtableResponseBaseline:${owner.operationId}`]);
+    }
   }
+}
+async function cleanupOldTerminalReceipts() {
+  const saved = await chrome.storage.local.get(null);
+  const expired = Object.entries(saved).filter(([key, value]) => key.startsWith(TERMINAL_RECEIPT_PREFIX) && typeof value?.completedAt === "number" && Date.now() - value.completedAt > 7 * 24 * 60 * 60 * 1e3).map(([key]) => key);
+  if (expired.length) await chrome.storage.local.remove(expired);
 }
 async function acceleratePendingReplies() {
   if (accelerationRunning) return;
@@ -4838,14 +5041,21 @@ async function acceleratePendingReplies() {
     await replayPendingTerminalEvents(state);
     await foregroundReplies.sync(await loadState()).catch(() => void 0);
     const privateTargets = [
-      ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId }))),
-      ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => ({ provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId })))
+      ...state.werewolfGames.flatMap((game) => gamePendingTurns(game).map((operation) => ({ operation, provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId }))),
+      ...state.clocktowerGames.flatMap((game) => clocktowerPendingTurns(game).map((operation) => ({ operation, provider: operation.provider, tabId: game.bindings[operation.playerId]?.tabId })))
     ];
     await Promise.allSettled(privateTargets.map(async ({ tabId, provider }) => {
       if (!tabId || !await isManagedTab(tabId, provider)) return;
-      await preparePrivateGamePage(tabId, provider);
+      await preparePrivateGamePage(tabId, provider, false);
       await startPageFramePump(tabId, provider);
     }));
+    const stalled = privateTargets.find(({ operation, tabId }) => tabId && operation.phase === "active" && !sendingOperations.has(operation.operationId) && Date.now() - gameReplyTiming(operation, lastProviderActivity.get(operation.operationId)).lastActivityAt >= 12e3);
+    if (stalled?.tabId) await pulseStalledPrivateReply(
+      stalled.operation.operationId,
+      stalled.tabId,
+      stalled.provider,
+      gameReplyTiming(stalled.operation, lastProviderActivity.get(stalled.operation.operationId)).lastActivityAt
+    );
     const targets = [
       ...state.conversations.flatMap((session) => Object.values(session.pendingOperations ?? {}).map((operation) => ({ operation, tabId: session.bindings[operation.provider]?.tabId })))
     ];
@@ -4956,6 +5166,7 @@ void (async () => {
   await clocktowerEngine.recover();
   await recoverQueuedCommands();
   void cleanupUnusedAttachmentData().catch(console.warn);
+  void cleanupOldTerminalReceipts().catch(console.warn);
   await syncProviderWatchdog();
   await checkPendingProviders();
 })();
@@ -4967,8 +5178,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const event = message.event;
     event.tabId = sender.tab?.id;
     event.url = sender.tab?.url;
-    if (event.operationId) lastProviderActivity.set(event.operationId, Date.now());
-    routeProviderEvent(event).then(() => sendResponse({ success: true })).catch((error) => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));
+    if (event.operationId && isProviderReplyActivity(event)) lastProviderActivity.set(event.operationId, Date.now());
+    routeProviderEvent(event).then((accepted) => sendResponse({ success: accepted })).catch((error) => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   }
   (async () => {

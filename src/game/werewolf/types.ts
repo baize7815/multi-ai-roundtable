@@ -135,6 +135,9 @@ export interface WerewolfPendingTurn {
   retryCount: number;
   startedAt: number;
   phase: 'preparing' | 'active';
+  responseStartedAt?: number;
+  responseLastActivityAt?: number;
+  submissionUnconfirmedAt?: number;
 }
 
 export interface WerewolfPendingHumanAction {

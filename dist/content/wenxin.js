@@ -3,6 +3,7 @@
   // src/content/common.ts
   var operationKeepAlive = /* @__PURE__ */ new Map();
   var operationPhases = /* @__PURE__ */ new Map();
+  var privateGameOperations = /* @__PURE__ */ new Set();
   var terminalEvents = /* @__PURE__ */ new Map();
   var terminalDeliveries = /* @__PURE__ */ new Map();
   var pendingDomChecks = /* @__PURE__ */ new Set();
@@ -90,7 +91,9 @@
   }
   function emitProviderEvent(event) {
     if (event.operationId) beginOperationKeepAlive(event.operationId);
+    if (event.operationId && (event.type === "PROVIDER_RESPONSE_COMPLETED" || event.type === "PROVIDER_ERROR")) privateGameOperations.delete(event.operationId);
     if (event.operationId && (event.type === "PROVIDER_RESPONSE_COMPLETED" || event.type === "PROVIDER_ERROR")) {
+      if (event.type === "PROVIDER_ERROR" && (terminalEvents.get(event.operationId)?.type === "PROVIDER_RESPONSE_COMPLETED" || operationPhases.get(event.operationId) === "completed")) return;
       operationPhases.set(event.operationId, event.type === "PROVIDER_ERROR" ? "error" : "completed");
       terminalEvents.set(event.operationId, event);
       void deliverTerminalEvent(event);
@@ -136,10 +139,60 @@
   async function releaseProviderWake(operationId) {
     await chrome.runtime.sendMessage({ type: "RELEASE_PROVIDER_WAKE", operationId }).catch(() => void 0);
   }
+  var pendingRecoveryChecks = /* @__PURE__ */ new Map();
+  async function recoverStableProviderReply(options) {
+    const previous = pendingRecoveryChecks.get(options.operationId);
+    if (previous) return previous;
+    const task = (async () => {
+      const first = await options.readSnapshot();
+      if (!first.owned || !first.text.trim() || first.generating) return false;
+      await sleep(options.settleMs ?? 1800);
+      const second = await options.readSnapshot();
+      if (!second.owned || second.generating || !second.text.trim() || second.text !== first.text) return false;
+      const terminal = {
+        type: "PROVIDER_RESPONSE_COMPLETED",
+        provider: options.provider,
+        operationId: options.operationId,
+        text: second.text
+      };
+      await chrome.storage.local.set({ [`${TERMINAL_KEY_PREFIX}${options.operationId}`]: terminal });
+      await options.onFinalized();
+      emitProviderEvent(terminal);
+      return true;
+    })();
+    pendingRecoveryChecks.set(options.operationId, task);
+    try {
+      return await task;
+    } finally {
+      if (pendingRecoveryChecks.get(options.operationId) === task) pendingRecoveryChecks.delete(options.operationId);
+    }
+  }
+  function markProviderSubmissionUnconfirmed(operationId) {
+    if (operationPhases.get(operationId) === "sending") operationPhases.set(operationId, "unconfirmed");
+  }
+  function isPrivateGameOperation(operationId) {
+    return privateGameOperations.has(operationId);
+  }
   async function confirmProviderSubmission(operationId, options) {
     let woke = false;
     try {
       nudgeProviderPage();
+      if (isPrivateGameOperation(operationId)) {
+        const deadline = Date.now() + (options.privateGameTimeoutMs ?? 3e4);
+        while (Date.now() < deadline) {
+          if (!options.current()) throw new Error("AI \u64CD\u4F5C\u5DF2\u4E2D\u65AD");
+          if (options.submitted()) return;
+          if (!woke && Date.now() >= deadline - Math.min(12e3, (options.privateGameTimeoutMs ?? 3e4) / 2)) {
+            woke = true;
+            await requestProviderWake(operationId).catch(() => void 0);
+          }
+          await waitForDomMutation(500);
+        }
+        if (!options.current()) throw new Error("AI \u64CD\u4F5C\u5DF2\u4E2D\u65AD");
+        if (options.submitted()) return;
+        markProviderSubmissionUnconfirmed(operationId);
+        return;
+      }
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const deadline = Date.now() + (options.attemptTimeoutMs ?? 2500);
         while (Date.now() < deadline) {
@@ -321,6 +374,7 @@ ${body.map((row) => `| ${row.join(" | ")} |`).join("\n")}
       }
       if (message?.type === "PROVIDER_SEND") {
         const operationId = String(message.operationId ?? crypto.randomUUID());
+        if (message.privateGame === true) privateGameOperations.add(operationId);
         if (operationPhases.has(operationId)) {
           checkDomNow();
           sendResponse({ success: true, phase: operationPhases.get(operationId) });
@@ -331,7 +385,21 @@ ${body.map((row) => `| ${row.join(" | ")} |`).join("\n")}
         options.send(message.payload, operationId).then(() => {
           if (operationPhases.get(operationId) === "sending") operationPhases.set(operationId, "monitoring");
           sendResponse({ success: true, phase: operationPhases.get(operationId) });
-        }).catch((error) => {
+        }).catch(async (error) => {
+          const terminal = terminalEvents.get(operationId);
+          if (terminal?.type === "PROVIDER_RESPONSE_COMPLETED") {
+            sendResponse({ success: true, phase: "completed" });
+            return;
+          }
+          if (options.tryFinalize) {
+            try {
+              if (await options.tryFinalize(operationId)) {
+                sendResponse({ success: true, phase: "completed" });
+                return;
+              }
+            } catch {
+            }
+          }
           const text = error instanceof Error ? error.message : String(error);
           emitProviderEvent({ type: "PROVIDER_ERROR", provider: options.provider, operationId, error: text });
           sendResponse({ success: false, error: text });
@@ -339,6 +407,7 @@ ${body.map((row) => `| ${row.join(" | ")} |`).join("\n")}
         return true;
       }
       if (message?.type === "PROVIDER_CANCEL") {
+        if (message.operationId) privateGameOperations.delete(String(message.operationId));
         options.cancel(message.operationId).then(() => {
           endOperationKeepAlive(message.operationId);
           operationPhases.delete(message.operationId);
@@ -357,8 +426,11 @@ ${body.map((row) => `| ${row.join(" | ")} |`).join("\n")}
             emitProviderEvent(terminal);
             return { success: true, phase: "terminal" };
           }
+          if (message.tryFinalize === true && options.tryFinalize && await options.tryFinalize(operationId)) {
+            return { success: true, phase: "terminal" };
+          }
           const phase = operationPhases.get(operationId);
-          if (phase && (phase !== "monitoring" || !replyAccelerationEnabled || Date.now() - (monitorActivity.get(operationId) ?? 0) < 3e4)) return { success: true, phase };
+          if (phase && (phase !== "monitoring" && phase !== "unconfirmed" || !replyAccelerationEnabled || Date.now() - (monitorActivity.get(operationId) ?? 0) < 3e4)) return { success: true, phase };
           if (!options.resumeMonitor) return { success: false, error: "\u5F53\u524D\u7F51\u9875\u4E0D\u652F\u6301\u6062\u590D\u76D1\u542C" };
           operationPhases.set(operationId, "monitoring");
           beginOperationKeepAlive(operationId);
@@ -571,6 +643,28 @@ ${body.map((row) => `| ${row.join(" | ")} |`).join("\n")}
       void clearMarker(operationId);
     });
   }
+  async function tryFinalize(operationId) {
+    if (activeOperationId !== operationId) return false;
+    const marker = await loadMarker(operationId);
+    if (!marker) return false;
+    return recoverStableProviderReply({
+      operationId,
+      provider: PROVIDER,
+      readSnapshot: () => {
+        const pair = findPair(marker);
+        return {
+          owned: activeOperationId === operationId && Boolean(pair),
+          text: pair ? readResponse(pair) : "",
+          generating: generationActive(pair)
+        };
+      },
+      onFinalized: async () => {
+        monitorAbort += 1;
+        activeOperationId = null;
+        await clearMarker(operationId);
+      }
+    });
+  }
   async function send(payload, operationId) {
     if (payload.attachments.length) throw new Error("\u6587\u5FC3\u7F51\u9875\u7AEF\u9644\u4EF6\u5165\u53E3\u7531\u52A8\u6001\u5DE5\u5177\u63A7\u5236\uFF0C\u5F53\u524D\u7248\u672C\u4EC5\u652F\u6301\u6587\u5B57\u8F6C\u53D1");
     activeOperationId = operationId;
@@ -671,5 +765,5 @@ ${body.map((row) => `| ${row.join(" | ")} |`).join("\n")}
       return false;
     }
   }
-  installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, ready });
+  installProviderHarness({ provider: PROVIDER, send, cancel, resumeMonitor, tryFinalize, ready });
 })();
